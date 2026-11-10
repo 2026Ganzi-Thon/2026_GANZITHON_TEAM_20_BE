@@ -1,0 +1,191 @@
+openapi: 3.1.0
+info:
+  title: NightVault Spring–Python 분석 계약
+  version: 0.1.0
+  description: |-
+    비공개 초안. Spring 작업 처리기만 호출한다. 실제 배포에서는 사설 네트워크와 서비스 자격 증명을 사용하며 내부 인증 방식은 배포 전에 확정한다.
+    Spring이 작업 상태, 시도 식별자, DB 커밋과 재시도를 소유한다. Python은 위기 분기와 Solar 호출·구조 검증을 수행하고 결과를 한 번의 동기 HTTP 응답으로 돌려준다. Spring이 이 호출을 백그라운드에서 실행한다.
+    Python은 제공자 호출에 더 짧은 제한 시간을 적용한다. 처리 결과와 상관없이 요청과 응답 본문, API 키를 일반 로그에 남기지 않는다. 게스트 인증·공개 시각·푸시 정보는 전달하지 않는다.
+security:
+- serviceBearer: []
+paths:
+  /internal/v1/analyze:
+    post:
+      operationId: analyzeWorry
+      summary: 한 번의 걱정 분석 시도
+      description: 스키마에 맞는 도메인 결과는 HTTP 200과 outcome으로 분기한다. 오류라도 위기 규칙이 명확한 결과는 SUPPORT_GUIDANCE를 사용한다. 판단 자체 실패는 FAILURE로
+        반환한다. Spring은 응답의 두 식별자를 비교하고 현재 시도에 해당하는 경우만 적용한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeRequest'
+            example:
+              requestId: a468359e-5c99-4c60-8cdd-1c5f167a02a3
+              attemptId: 843d6bcb-6f6b-42cd-b5b4-3fb68f331b8e
+              text: 내일 발표 때 첫 문장을 잊어버릴까 걱정돼.
+              anxiety: 3
+      responses:
+        '200':
+          description: 유효한 도메인 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeResult'
+              examples:
+                normal:
+                  value:
+                    requestId: a468359e-5c99-4c60-8cdd-1c5f167a02a3
+                    attemptId: 843d6bcb-6f6b-42cd-b5b4-3fb68f331b8e
+                    outcome: SUCCESS
+                    content:
+                      summary: 내일 발표를 앞두고 내용을 잊을까 걱정하고 있다.
+                      recommendation:
+                        type: ACTION
+                        reason: 발표의 시작 부분을 짧게 연습하면 준비할 행동을 한 가지 정할 수 있어요.
+                      actionSteps: [발표 자료의 첫 장을 열어요., 첫 문장을 소리 내어 한 번 읽어요., 막힌 단어 하나를 메모해요.]
+                      restGuide: 발을 바닥에 대고 어깨를 편하게 두어요.
+                      empathyMessage: 발표를 앞두면 준비한 내용을 잊을까 걱정될 수 있어요.
+                support:
+                  value:
+                    requestId: a468359e-5c99-4c60-8cdd-1c5f167a02a3
+                    attemptId: 843d6bcb-6f6b-42cd-b5b4-3fb68f331b8e
+                    outcome: SUPPORT_GUIDANCE
+                    guidanceCode: S16
+                timeout:
+                  value:
+                    requestId: a468359e-5c99-4c60-8cdd-1c5f167a02a3
+                    attemptId: 843d6bcb-6f6b-42cd-b5b4-3fb68f331b8e
+                    outcome: FAILURE
+                    failureCode: PROVIDER_TIMEOUT
+                assessmentFailed:
+                  value:
+                    requestId: a468359e-5c99-4c60-8cdd-1c5f167a02a3
+                    attemptId: 843d6bcb-6f6b-42cd-b5b4-3fb68f331b8e
+                    outcome: FAILURE
+                    failureCode: ASSESSMENT_FAILED
+        '400':
+          description: 계약과 맞지 않는 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransportError'
+              examples:
+                invalid:
+                  value:
+                    code: INVALID_REQUEST
+        '401':
+          description: 내부 호출 인증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransportError'
+              examples:
+                unauthorized:
+                  value:
+                    code: UNAUTHORIZED
+        '503':
+          description: AI 서버 일시 사용 불가
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransportError'
+              examples:
+                unavailable:
+                  value:
+                    code: TEMPORARILY_UNAVAILABLE
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      description: 배포 시 결정할 서비스 자격 증명 초안. 브라우저 게스트 자격 증명과 분리한다.
+  schemas:
+    AnalyzeRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, attemptId, text]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        attemptId:
+          type: string
+          format: uuid
+        text:
+          $ref: ./openapi.yaml#/components/schemas/WorryText
+        anxiety:
+          $ref: ./openapi.yaml#/components/schemas/Anxiety
+        memo:
+          $ref: ./openapi.yaml#/components/schemas/Memo
+    AnalyzeResult:
+      oneOf:
+      - $ref: '#/components/schemas/AnalyzeSuccess'
+      - $ref: '#/components/schemas/AnalyzeSupport'
+      - $ref: '#/components/schemas/AnalyzeFailure'
+      discriminator:
+        propertyName: outcome
+        mapping:
+          SUCCESS: '#/components/schemas/AnalyzeSuccess'
+          SUPPORT_GUIDANCE: '#/components/schemas/AnalyzeSupport'
+          FAILURE: '#/components/schemas/AnalyzeFailure'
+    AnalyzeSuccess:
+      type: object
+      additionalProperties: false
+      required: [requestId, attemptId, outcome, content]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        attemptId:
+          type: string
+          format: uuid
+        outcome:
+          type: string
+          const: SUCCESS
+        content:
+          $ref: ./openapi.yaml#/components/schemas/GeneratedContent
+    AnalyzeSupport:
+      type: object
+      additionalProperties: false
+      required: [requestId, attemptId, outcome, guidanceCode]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        attemptId:
+          type: string
+          format: uuid
+        outcome:
+          type: string
+          const: SUPPORT_GUIDANCE
+        guidanceCode:
+          type: string
+          const: S16
+    AnalyzeFailure:
+      type: object
+      additionalProperties: false
+      required: [requestId, attemptId, outcome, failureCode]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        attemptId:
+          type: string
+          format: uuid
+        outcome:
+          type: string
+          const: FAILURE
+        failureCode:
+          type: string
+          enum: [ASSESSMENT_FAILED, PROVIDER_TIMEOUT, PROVIDER_RATE_LIMITED, PROVIDER_UNAVAILABLE, INVALID_PROVIDER_RESPONSE,
+            INTERNAL_ERROR]
+    TransportError:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [INVALID_REQUEST, UNAUTHORIZED, TEMPORARILY_UNAVAILABLE]

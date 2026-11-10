@@ -1,0 +1,116 @@
+Project nightvault {
+  database_type: 'PostgreSQL'
+  Note: '공동 검토용 논리 ERD. 관계와 대표 컬럼은 erd.md의 Mermaid와 일치한다.'
+}
+
+Table guests {
+  id uuid [pk]
+  state text [not null]
+  created_at timestamptz [not null]
+}
+
+Table guest_sessions {
+  id uuid [pk]
+  guest_id uuid [not null]
+  token_hash bytea [not null, unique]
+  expires_at timestamptz [not null]
+}
+
+Table guest_settings {
+  guest_id uuid [pk]
+  default_open_local_time time [not null]
+
+  Note: '게스트당 선택 설정은 최대 한 건이다. 기본 공개 시각은 08:00이다.'
+}
+
+Table analysis_requests {
+  id uuid [pk]
+  guest_id uuid [not null]
+  submission_key uuid [not null]
+  attempt_id uuid
+  state text [not null]
+  accepted_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  publish_at timestamptz
+
+  indexes {
+    (guest_id, submission_key) [unique]
+    (id, guest_id) [unique]
+  }
+
+  Note: '내용 없는 제출 영수증만 남는 경우 publish_at을 비울 수 있다.'
+}
+
+Table analysis_retries {
+  request_id uuid [not null]
+  retry_key uuid [not null]
+  accepted_at timestamptz [not null]
+
+  indexes {
+    (request_id, retry_key) [pk]
+  }
+}
+
+Table worries {
+  id uuid [pk]
+  guest_id uuid [not null]
+  request_id uuid [not null, unique]
+  created_at timestamptz [not null]
+  sealed_at timestamptz [not null]
+  publish_at timestamptz [not null]
+  first_viewed_at timestamptz
+  expires_at timestamptz [not null]
+  deletion_started_at timestamptz
+
+  Note: '분석 요청 하나에서 걱정은 최대 한 건 생성된다. 복합 FK가 분석 요청과 걱정의 소유권을 일치시킨다.'
+}
+
+Table ai_contents {
+  worry_id uuid [pk]
+  content_ciphertext bytea [not null]
+
+  Note: '걱정과 AI 콘텐츠는 한 트랜잭션에서 1:1로 저장한다.'
+}
+
+Table activities {
+  id uuid [pk]
+  worry_id uuid [not null]
+  help_type text [not null]
+  state text [not null]
+
+  Note: 'BE2 검토 범위다. 걱정별 활동 이력을 여러 건 저장할 수 있다.'
+}
+
+Table activity_feedback {
+  activity_id uuid [pk]
+  answer text [not null]
+}
+
+Table reflections {
+  worry_id uuid [pk]
+  answer text [not null]
+  responded_at timestamptz [not null]
+}
+
+Table deletion_records {
+  id uuid [pk]
+  target_type text [not null]
+  target_id uuid [not null]
+  owner_ref uuid
+  state text [not null]
+  completed_at timestamptz
+
+  Note: '삭제된 데이터와 별도 수명으로 보관하는 독립 이력이다.'
+}
+
+// FK 방향과 복합 키는 erd.md의 제약을 따른다.
+Ref: guests.id < guest_sessions.guest_id // 1 to 0..N
+Ref: guests.id - guest_settings.guest_id // 1 to 0..1
+Ref: guests.id < analysis_requests.guest_id // 1 to 0..N
+Ref: analysis_requests.id < analysis_retries.request_id // 1 to 0..N
+Ref: analysis_requests.(id, guest_id) - worries.(request_id, guest_id) // 1 to 0..1
+Ref: guests.id < worries.guest_id // 1 to 0..N
+Ref: worries.id - ai_contents.worry_id // 1 to 1
+Ref: worries.id < activities.worry_id // 1 to 0..N
+Ref: activities.id - activity_feedback.activity_id // 1 to 0..1
+Ref: worries.id - reflections.worry_id // 1 to 0..1

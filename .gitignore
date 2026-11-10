@@ -1,0 +1,30 @@
+# Gradle and Java build output
+.gradle/
+build/
+out/
+*.class
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime logs and PostgreSQL backups
+*.log
+*.dump
+*.backup
+*.sql.gz
+
+# IDE and operating system files
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
