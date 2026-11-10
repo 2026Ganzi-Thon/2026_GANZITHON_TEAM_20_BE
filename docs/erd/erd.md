@@ -168,4 +168,4 @@ DBML 원본을 dbdiagram.io에 붙여 넣어 관계를 탐색하거나 편집할
 - **BE1·프런트엔드**는 CSRF 초기화와 재발급, 공백·글자 수 기준, 오류 코드, 공개 전후 응답 및 열람 기록 타이밍을 확인한다.
 - **BE1·AI**는 내부 호출 인증, 전달 필드, 제한 시간·자동 재시도 정책을 확정한다. 위기 감지 조건·안내 문구·연결 정보는 별도 정책을 적용한다.
 
-기준 문서는 기능명세서 A·N·TIME·AI·M·LOCK·D·C와 화면 동작 정책 §3~6·§8·§10~11이다. [PostgreSQL 작업 행 잠금](https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE)
+기준 문서는 기능명세서 A·N·TIME·AI·M·LOCK·D·C와 화면 동작 정책 §3~6·§8·§10~11이다. [PostgreSQL 작업 행 잠금](https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE)

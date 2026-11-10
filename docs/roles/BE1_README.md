@@ -1,12 +1,12 @@
 # BE1 개발 계획
 
-[통합 개발 계획](../../../README.md) · [AI 개발 계획](../../../AI/readme.md) · [BE2 개발 계획](../BE2/readme.md)
+[통합 개발 계획](../../README.md) · [AI 개발 계획](../../AI/AI_README.md) · [BE2 개발 계획](BE2_README.md)
 
 게스트가 모바일 웹에서 걱정을 맡기고, 서버가 AI 분석을 처리한 뒤 정해진 시각부터 확인할 수 있게 한다. 걱정 접수·봉인, 접근 권한, 공개 상태, 알림, 위기 안내 연동을 담당한다.
 
 ## 담당과 스택
 
-**BE1·AI 담당자**가 Java 21, Spring Boot 4.1.x, Spring Security, PostgreSQL로 구현한다. AI는 [Python 계획](../../../AI/readme.md)에 따라 별도로 구현하고, Spring이 내부 HTTP로 호출하는 구성을 제안한다.
+**BE1·AI 담당자**가 Java 21, Spring Boot 4.1.x, Spring Security, PostgreSQL로 구현한다. AI는 [Python 계획](../../AI/AI_README.md)에 따라 별도로 구현하고, Spring이 내부 HTTP로 호출하는 구성을 제안한다.
 
 ## 첫 구현에서 사용할 설계
 
