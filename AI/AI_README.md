@@ -1,6 +1,6 @@
 # AI 개발 계획
 
-[통합 개발 계획](../README.md) · [BE1 개발 계획](../docs/roles/BE1_README.md) · [BE2 개발 계획](../docs/roles/BE2_README.md)
+[통합 개발 계획](../docs/development-plan.md) · [BE1 개발 계획](../docs/roles/BE1_README.md) · [BE2 개발 계획](../docs/roles/BE2_README.md)
 
 **담당은 BE1·AI 담당자**, 구현 언어는 **Python**이다. 첫 모델 후보는 **Solar Mini 4**이며 합성 입력의 품질·응답 시간 평가 후 확정한다.
 

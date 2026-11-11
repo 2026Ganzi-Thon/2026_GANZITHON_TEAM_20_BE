@@ -1,6 +1,6 @@
 # NightVault ERD · 1차 공동 검토안
 
-[통합 개발 계획](../../README.md) · [공개 API](../api/openapi.yaml) · [Spring–Python 분석 계약](../api/ai-contract.yaml)
+[통합 개발 계획](../development-plan.md) · [공개 API](../api/openapi.yaml) · [Spring–Python 분석 계약](../api/ai-contract.yaml)
 
 **범위**는 게스트 인증부터 걱정 접수·봉인·공개·최초 열람과 개별 삭제 경계까지다. 활동·평가·회고의 관계는 BE2 검토용으로 표시했다. 알림, 과거 경험 검색, 전체 삭제의 세부 API와 물리 스키마는 다음 단계에서 확정한다.
 

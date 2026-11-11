@@ -2,7 +2,7 @@
 
 BE1·AI는 게스트 인증부터 걱정 접수·분석·봉인·공개·알림을 맡고, BE2는 공개 후 활동·기록·회고·삭제를 맡는다. 현재 게스트 인증과 3단계 백엔드의 접수·조회·재시도·봉인을 확인했다. 프런트엔드의 분석 진행 화면과 Python 내부 HTTP 연동은 각 담당 단계에서 확인한다.
 
-[통합 개발 계획](README.md) · [BE1 계획](docs/roles/BE1_README.md) · [BE2 계획](docs/roles/BE2_README.md) · [AI 계획](AI/AI_README.md) · [ERD](docs/erd/erd.md) · [공개 API](docs/api/openapi.yaml) · [내부 AI 계약](docs/api/ai-contract.yaml)
+[통합 개발 계획](docs/development-plan.md) · [BE1 계획](docs/roles/BE1_README.md) · [BE2 계획](docs/roles/BE2_README.md) · [AI 계획](AI/AI_README.md) · [ERD](docs/erd/erd.md) · [공개 API](docs/api/openapi.yaml) · [내부 AI 계약](docs/api/ai-contract.yaml)
 
 ## 1. 준비·설계
 
