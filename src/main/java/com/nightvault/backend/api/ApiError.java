@@ -28,6 +28,7 @@ public enum ApiError {
     ACTION_STEPS_INCOMPLETE(HttpStatus.CONFLICT, "세 단계를 모두 마치면 완료할 수 있어요."),
     REST_NOT_FINISHED(HttpStatus.CONFLICT, "아직 휴식 시간이 남았어요."),
     REST_TIME_OVER(HttpStatus.CONFLICT, "휴식 시간이 끝났어요."),
+    ACTIVITY_NOT_COMPLETED(HttpStatus.CONFLICT, "완료한 활동만 평가할 수 있어요."),
     TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus status;
