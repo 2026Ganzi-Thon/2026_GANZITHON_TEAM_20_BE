@@ -151,7 +151,11 @@ class ActivityAccessTest extends ActivityApiSupport {
 
     /** 활동 ID를 받는 모든 경로. */
     List<Function<UUID, Response>> activityCalls(Client client) {
-        return List.of(client::activity);
+        return List.of(
+            client::activity,
+            id -> client.step(id, 1, true),
+            client::pause,
+            client::resume);
     }
 
     static void assertNotFound(Response response) {

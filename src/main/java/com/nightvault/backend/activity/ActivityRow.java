@@ -67,4 +67,23 @@ record ActivityRow(
             startedAt, now, now, null, step1Done, step2Done, step3Done,
             restDurationSeconds, null, null, version + 1);
     }
+
+    ActivityRow withStep(int stepNo, boolean done) {
+        return new ActivityRow(id, guestId, worryId, helpType, state,
+            startedAt, lastStartedAt, stateChangedAt, endedAt,
+            stepNo == 1 ? done : step1Done, stepNo == 2 ? done : step2Done, stepNo == 3 ? done : step3Done,
+            restDurationSeconds, restEndsAt, restRemainingSeconds, version + 1);
+    }
+
+    ActivityRow pauseRest(Instant now, int remaining) {
+        return new ActivityRow(id, guestId, worryId, helpType, ActivityState.PAUSED,
+            startedAt, lastStartedAt, now, null, null, null, null,
+            restDurationSeconds, null, Math.min(remaining, restDurationSeconds), version + 1);
+    }
+
+    ActivityRow resumeRest(Instant now) {
+        return new ActivityRow(id, guestId, worryId, helpType, ActivityState.IN_PROGRESS,
+            startedAt, lastStartedAt, now, null, null, null, null,
+            restDurationSeconds, now.plusSeconds(restRemainingSeconds), null, version + 1);
+    }
 }

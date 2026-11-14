@@ -6,6 +6,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.nightvault.backend.activity.ActivityRow.ActivityState;
 import com.nightvault.backend.activity.ActivityRow.HelpType;
 import com.nightvault.backend.api.ApiError;
 import org.springframework.beans.factory.annotation.Value;
@@ -94,6 +95,55 @@ class ActivityService {
         return ActivityView.of(store.find(guestId, activityId).orElseThrow(ActivityService::notFound), now);
     }
 
+    /** 액션 체크 저장·해제(ACT-02). 순서 자유, 같은 값 재전송은 멱등. 진행 중 액션만. */
+    @Transactional
+    ActivityView setStep(UUID guestId, UUID activityId, int stepNo, boolean done) {
+        Instant now = now();
+        ActivityRow row = lockForWrite(guestId, activityId, now);
+        requireType(row, HelpType.ACTION);
+        requireNotEnded(row);
+        if (row.step(stepNo) == done) {
+            return ActivityView.of(row, now);
+        }
+        ActivityRow updated = row.withStep(stepNo, done);
+        store.update(updated);
+        return ActivityView.of(updated, now);
+    }
+
+    /** 휴식 일시정지(REST-02). 남은 시간을 저장하고 종료 예정 시각을 비운다. 0초 이후면 409 {@code REST_TIME_OVER}. */
+    @Transactional
+    ActivityView pause(UUID guestId, UUID activityId) {
+        Instant now = now();
+        ActivityRow row = lockForWrite(guestId, activityId, now);
+        requireType(row, HelpType.REST);
+        requireNotEnded(row);
+        if (row.state() == ActivityState.PAUSED) {
+            return ActivityView.of(row, now);
+        }
+        int remaining = row.remainingSeconds(now);
+        if (remaining <= 0) {
+            throw new ActivityException(ApiError.REST_TIME_OVER);
+        }
+        ActivityRow updated = row.pauseRest(now, remaining);
+        store.update(updated);
+        return ActivityView.of(updated, now);
+    }
+
+    /** 휴식 재개(REST-02). 종료 예정 시각 = 서버 현재 + 남은 시간. */
+    @Transactional
+    ActivityView resume(UUID guestId, UUID activityId) {
+        Instant now = now();
+        ActivityRow row = lockForWrite(guestId, activityId, now);
+        requireType(row, HelpType.REST);
+        requireNotEnded(row);
+        if (row.state() == ActivityState.IN_PROGRESS) {
+            return ActivityView.of(row, now);
+        }
+        ActivityRow updated = row.resumeRest(now);
+        store.update(updated);
+        return ActivityView.of(updated, now);
+    }
+
     // ---- 내부 ----
 
     /** 활동 쓰기 공통: 소유 확인 → 게스트·걱정 잠금(접근 검사) → 활동 잠금. */
@@ -101,6 +151,18 @@ class ActivityService {
         UUID worryId = store.findWorryId(guestId, activityId).orElseThrow(ActivityService::notFound);
         worries.lockForWrite(guestId, worryId, now);
         return store.lock(guestId, activityId).orElseThrow(ActivityService::notFound);
+    }
+
+    private static void requireType(ActivityRow row, HelpType helpType) {
+        if (row.helpType() != helpType) {
+            throw new ActivityException(ApiError.INVALID_ACTIVITY_STATE);
+        }
+    }
+
+    private static void requireNotEnded(ActivityRow row) {
+        if (row.state().ended()) {
+            throw new ActivityException(ApiError.ACTIVITY_ALREADY_ENDED);
+        }
     }
 
     private Instant now() {

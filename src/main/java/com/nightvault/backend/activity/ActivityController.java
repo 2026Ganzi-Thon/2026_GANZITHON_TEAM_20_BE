@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
@@ -26,6 +27,7 @@ import tools.jackson.databind.JsonNode;
 class ActivityController {
     private static final String ACTIVITIES = "/api/v1/activities";
     private static final Set<String> HELP_TYPES = Set.of("ACTION", "REST", "EMPATHY");
+    private static final Set<String> STEP_NUMBERS = Set.of("1", "2", "3");
 
     private final ActivityService activities;
 
@@ -57,6 +59,30 @@ class ActivityController {
     @GetMapping(ACTIVITIES + "/{activityId}")
     ResponseEntity<ActivityView> get(@AuthenticationPrincipal UUID guestId, @PathVariable("activityId") String activityId) {
         return ok(activities.get(guestId, uuid(activityId)));
+    }
+
+    @PutMapping(path = ACTIVITIES + "/{activityId}/steps/{stepNo}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<ActivityView> step(
+        @AuthenticationPrincipal UUID guestId,
+        @PathVariable("activityId") String activityId,
+        @PathVariable("stepNo") String stepNo,
+        @RequestBody JsonNode body
+    ) {
+        if (!STEP_NUMBERS.contains(stepNo) || !body.isObject() || body.size() != 1
+            || !body.has("done") || !body.get("done").isBoolean()) {
+            throw new ActivityException(ApiError.INVALID_INPUT);
+        }
+        return ok(activities.setStep(guestId, uuid(activityId), Integer.parseInt(stepNo), body.get("done").asBoolean()));
+    }
+
+    @PostMapping(ACTIVITIES + "/{activityId}/pause")
+    ResponseEntity<ActivityView> pause(@AuthenticationPrincipal UUID guestId, @PathVariable("activityId") String activityId) {
+        return ok(activities.pause(guestId, uuid(activityId)));
+    }
+
+    @PostMapping(ACTIVITIES + "/{activityId}/resume")
+    ResponseEntity<ActivityView> resume(@AuthenticationPrincipal UUID guestId, @PathVariable("activityId") String activityId) {
+        return ok(activities.resume(guestId, uuid(activityId)));
     }
 
     @ExceptionHandler(ActivityException.class)
