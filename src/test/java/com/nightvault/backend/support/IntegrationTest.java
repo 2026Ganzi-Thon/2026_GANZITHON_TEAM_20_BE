@@ -18,11 +18,12 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  *   <li>컨테이너는 JVM당 하나만 띄워 모든 테스트 클래스가 공유한다(싱글턴 컨테이너). 종료는 Testcontainers(Ryuk)가 맡는다.</li>
  *   <li>스프링 컨텍스트도 설정이 같으면 캐시되므로, 하위 클래스는 컨텍스트 설정(@MockitoBean, 추가 properties 등)을 되도록 늘리지 않는다.</li>
  *   <li>각 테스트 시작 전에 Flyway 이력을 뺀 모든 테이블을 비운다. 테스트 데이터는 {@link WorryFixtures}로 넣는다.</li>
+ *   <li>서버 {@code Clock}은 {@link TestClock}으로 바뀌며, 각 테스트 시작 전에 실제 시각으로 되돌린다.</li>
  * </ul>
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@Import(WorryFixtures.class)
+@Import({WorryFixtures.class, TestClock.class})
 public abstract class IntegrationTest {
 
     @ServiceConnection
@@ -38,8 +39,12 @@ public abstract class IntegrationTest {
     @Autowired
     protected WorryFixtures fixtures;
 
+    @Autowired
+    protected TestClock clock;
+
     @BeforeEach
     void cleanDatabase() {
+        clock.reset();
         List<String> tables = jdbc.sql("""
                 SELECT quote_ident(tablename)
                 FROM pg_tables
