@@ -5,6 +5,10 @@ spring:
     import: "optional:file:./.env[.properties]"
   profiles:
     active: "${SPRING_PROFILES_ACTIVE:}"
+  flyway:
+    # Existing BE1 and BE2 databases applied different timestamped versions before integration.
+    out-of-order: true
+    group: true
   task:
     scheduling:
       pool:

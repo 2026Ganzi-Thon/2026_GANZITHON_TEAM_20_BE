@@ -11,10 +11,10 @@
 
 ## 활동과 평가
 
-- `GET /worries/{worryId}/activities`는 활동 이력, `GET /activities/current`는 최근 진행·일시정지 활동을 반환한다. 이어갈 활동이 없으면 현재 활동 조회는 `204`다.
-- `POST /worries/{worryId}/activities`에 `Idempotency-Key` UUID와 `{"helpType":"ACTION","replaceActive":false}`를 보낸다. 유형은 `ACTION`, `REST`, `EMPATHY`다. 진행·일시정지 중 새 활동을 시작하려면 사용자가 변경에 동의한 뒤 `replaceActive: true`를 보낸다. 파쇄는 개별 삭제 API를 사용한다.
-- `POST /worries/{worryId}/activities/{activityId}/commands`에 `command`를 보낸다. 액션의 `CHECK`에는 `step` 1~3과 `checked` 불리언을 포함한다. `PAUSE`, `RESUME`, `STOP`, `COMPLETE`는 활동 종류와 서버 상태에 따라 적용된다. 액션은 완료 전에 세 단계를 확인하고 휴식은 3분이 지난 뒤 완료할 수 있다. 공감은 확인 버튼으로 완료한다.
-- `PUT /worries/{worryId}/activities/{activityId}/feedback`에 `{"answer":"HELPFUL"}`를 보낸다. 완료된 활동만 `HELPFUL`, `UNSURE`, `NOT_HELPFUL` 중 하나를 저장할 수 있다. 시작·명령·평가의 `200`에는 `activityId`, `worryId`, `helpType`, `state`, `checkedSteps`, `remainingMillis`, `endsAt`, `feedback`이 있다. 유효하지 않은 상태 변경은 `409 ACTIVITY_CONFLICT`다.
+- `POST /worries/{worryId}/activities`에 `{"helpType":"ACTION","replaceOpen":false}`를 보낸다. 새 활동은 `201`, 기존 열린 활동 또는 액션 재개는 `200`이다. 도움 변경에 동의하면 `replaceOpen: true`로 보낸다.
+- `GET /activities/{activityId}`에서 활동과 진행 상태를 복원한다. `PUT /activities/{activityId}/steps/{stepNo}`는 `{"done":true}`를 받는다. `POST /activities/{activityId}/pause`, `/resume`, `/stop`, `/complete`는 [OpenAPI](openapi.yaml)의 상태 전이 규칙을 따른다.
+- `PUT /activities/{activityId}/feedback`에 `{"answer":"HELPFUL"}`를 보낸다. 완료된 활동에서 `HELPFUL`, `UNSURE`, `NOT_HELPFUL` 중 하나를 저장할 수 있다. `GET /activities/current`는 홈 이어하기용 `progress`를 돌려주고, 이어갈 활동이 없으면 `204`를 돌려준다.
+- BE1 호환 경로로 `GET /worries/{worryId}/activities`, `POST /worries/{worryId}/activities/{activityId}/commands`, `PUT /worries/{worryId}/activities/{activityId}/feedback`을 유지한다. UUID `Idempotency-Key`를 보내고 `replaceOpen`을 생략한 기존 시작 요청도 `200`과 BE1 응답 형식을 유지한다. 호환 응답의 `remainingMillis`는 통합된 타이머의 초를 밀리초로 환산한다.
 
 ## 회고와 과거 경험
 
