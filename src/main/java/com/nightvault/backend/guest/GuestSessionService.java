@@ -4,10 +4,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,9 +25,11 @@ class GuestSessionService {
     private static final Pattern TOKEN_FORMAT = Pattern.compile("[A-Za-z0-9_-]{43}");
 
     private final JdbcClient jdbc;
+    private final Clock clock;
 
-    GuestSessionService(JdbcClient jdbc) {
+    GuestSessionService(JdbcClient jdbc, Clock clock) {
         this.jdbc = jdbc;
+        this.clock = clock;
     }
 
     @Transactional
@@ -37,15 +39,16 @@ class GuestSessionService {
             return existing;
         }
 
-        var guestId = jdbc.sql("INSERT INTO guests DEFAULT VALUES RETURNING id")
-            .query(UUID.class).single();
+        var now = OffsetDateTime.now(clock);
+        var guestId = jdbc.sql("INSERT INTO guests (created_at) VALUES (:now) RETURNING id")
+            .param("now", now).query(UUID.class).single();
         jdbc.sql("INSERT INTO guest_settings (guest_id) VALUES (:guestId)")
             .param("guestId", guestId).update();
 
         byte[] entropy = new byte[32];
         RANDOM.nextBytes(entropy);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(entropy);
-        var expiresAt = OffsetDateTime.now(ZoneOffset.UTC).plus(SESSION_LIFETIME);
+        var expiresAt = now.plus(SESSION_LIFETIME);
 
         Instant storedExpiry = jdbc.sql("""
             INSERT INTO guest_sessions (guest_id, token_hash, expires_at)
@@ -64,7 +67,7 @@ class GuestSessionService {
         if (!isToken(token)) {
             return Optional.empty();
         }
-        var now = OffsetDateTime.now(ZoneOffset.UTC);
+        var now = OffsetDateTime.now(clock);
         return jdbc.sql("""
             UPDATE guest_sessions AS session
             SET expires_at = GREATEST(session.expires_at, :expiresAt)
@@ -96,7 +99,7 @@ class GuestSessionService {
               AND session.expires_at > :now
             """)
             .param("hash", hash(token))
-            .param("now", OffsetDateTime.now(ZoneOffset.UTC))
+            .param("now", OffsetDateTime.now(clock))
             .query(UUID.class).optional();
     }
 

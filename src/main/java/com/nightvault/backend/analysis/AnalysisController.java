@@ -3,16 +3,11 @@ package com.nightvault.backend.analysis;
 import java.net.URI;
 import java.util.UUID;
 
-import com.nightvault.backend.api.ApiError;
-import org.springframework.dao.DataAccessException;
+import com.nightvault.backend.api.ApiUuid;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.transaction.TransactionException;
-import org.springframework.web.bind.MissingRequestValueException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,7 +36,7 @@ class AnalysisController {
         @RequestHeader(ANALYSIS_CONTEXT) String context,
         @RequestBody JsonNode body
     ) {
-        return response(requests.submit(guestId, WorryInput.uuid(key), WorryInput.uuid(context), WorryInput.parse(body)));
+        return response(requests.submit(guestId, ApiUuid.parse(key), ApiUuid.parse(context), WorryInput.parse(body)));
     }
 
     @GetMapping(REQUESTS + "/{requestId}")
@@ -51,7 +46,7 @@ class AnalysisController {
         @RequestHeader(name = ANALYSIS_CONTEXT, required = false) String context
     ) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-            .body(requests.get(guestId, WorryInput.uuid(requestId), context == null ? null : WorryInput.uuid(context)));
+            .body(requests.get(guestId, ApiUuid.parse(requestId), context == null ? null : ApiUuid.parse(context)));
     }
 
     @PostMapping(path = REQUESTS + "/{requestId}/retry", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -62,8 +57,8 @@ class AnalysisController {
         @RequestHeader(ANALYSIS_CONTEXT) String context,
         @RequestBody JsonNode body
     ) {
-        return response(requests.retry(guestId, WorryInput.uuid(requestId), WorryInput.uuid(key),
-            WorryInput.uuid(context), WorryInput.parse(body)));
+        return response(requests.retry(guestId, ApiUuid.parse(requestId), ApiUuid.parse(key),
+            ApiUuid.parse(context), WorryInput.parse(body)));
     }
 
     @GetMapping("/api/v1/worry-publication/default")
@@ -71,21 +66,6 @@ class AnalysisController {
         @AuthenticationPrincipal UUID guestId, @RequestParam("timeZone") String timeZone
     ) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(requests.defaultPublication(guestId, timeZone));
-    }
-
-    @ExceptionHandler(AnalysisException.class)
-    ResponseEntity<ApiError.Body> analysisError(AnalysisException exception) {
-        return exception.error().response();
-    }
-
-    @ExceptionHandler({HttpMessageNotReadableException.class, MissingRequestValueException.class})
-    ResponseEntity<ApiError.Body> invalidRequest() {
-        return ApiError.INVALID_INPUT.response();
-    }
-
-    @ExceptionHandler({DataAccessException.class, TransactionException.class})
-    ResponseEntity<ApiError.Body> databaseUnavailable() {
-        return ApiError.TEMPORARILY_UNAVAILABLE.response();
     }
 
     private static ResponseEntity<AnalysisStatus> response(AnalysisRequests.Submission submission) {
