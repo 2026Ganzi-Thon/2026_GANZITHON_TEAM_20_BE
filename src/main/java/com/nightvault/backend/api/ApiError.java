@@ -21,6 +21,13 @@ public enum ApiError {
     INVALID_PUBLICATION(HttpStatus.UNPROCESSABLE_CONTENT, "공개할 날짜와 시간을 다시 선택해 주세요."),
     IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "동일 키가 다른 입력에 사용됐어요."),
     RETRY_NOT_ALLOWED(HttpStatus.CONFLICT, "재시도할 수 있는 상태가 아니에요."),
+    WORRY_LOCKED(HttpStatus.CONFLICT, "아직 공개되지 않았어요."),
+    OPEN_ACTIVITY_EXISTS(HttpStatus.CONFLICT, "진행 중인 도움이 있어요."),
+    INVALID_ACTIVITY_STATE(HttpStatus.CONFLICT, "지금 상태에서는 할 수 없어요."),
+    ACTIVITY_ALREADY_ENDED(HttpStatus.CONFLICT, "이미 끝난 활동이에요."),
+    ACTION_STEPS_INCOMPLETE(HttpStatus.CONFLICT, "세 단계를 모두 마치면 완료할 수 있어요."),
+    REST_NOT_FINISHED(HttpStatus.CONFLICT, "아직 휴식 시간이 남았어요."),
+    REST_TIME_OVER(HttpStatus.CONFLICT, "휴식 시간이 끝났어요."),
     TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus status;
