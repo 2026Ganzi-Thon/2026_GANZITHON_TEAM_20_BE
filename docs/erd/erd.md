@@ -113,7 +113,7 @@ DBML 원본을 dbdiagram.io에 붙여 넣어 관계를 탐색하거나 편집할
 | `guest_settings` | 현지 기본 공개 시각 | BE1. 기본 08:00. 기본 시각 변경은 이후 등록에 반영한다. 시간대는 기본 시각 조회에서 IANA 식별자로 받는다. |
 | `analysis_requests` | 제출 키, 최초 접수·만료·예정 공개, 처리 상태, 암호화된 임시 입력, 시도·선점 정보, 활성 앱 문맥 해시 | BE1. `UNIQUE (guest_id, submission_key)`. 임시 입력은 상태 전환과 함께 정리한다. 공개 API의 요청 ID는 최초 접수부터 유지한다. |
 | `analysis_retries` | 요청 ID, 사용자 재시도 키, 해당 동작의 접수 시각 | BE1. `PRIMARY KEY (request_id, retry_key)`. 재시도 동작의 중복 접수를 막는다. 작업 처리기가 사용하는 시도 ID와 별도로 관리한다. |
-| `worries` | 원문·메모·불안도와 수정 요약, 요청 연결, 작성·저장·공개·열람·만료·삭제 시각 | BE1·BE2. `UNIQUE (request_id)`. `(request_id, guest_id)` 복합 FK로 같은 소유자의 요청과 연결한다. 이를 위해 요청에 `UNIQUE (id, guest_id)`를 둔다. 시각·식별자와 분리해 민감한 입력·수정본을 암호화한다. |
+| `worries` | 원문·메모·봉인 전후 불안도와 수정 요약, 요청 연결, 작성·저장·공개·열람·만료·삭제 시각 | BE1·BE2. `UNIQUE (request_id)`. `(request_id, guest_id)` 복합 FK로 같은 소유자의 요청과 연결한다. 이를 위해 요청에 `UNIQUE (id, guest_id)`를 둔다. 봉인 전 불안도는 기존 `input_ciphertext`, 수정 요약과 공개 후 불안도는 각각 nullable `edited_summary_ciphertext`, `anxiety_after_ciphertext`에 저장한다. |
 | `ai_contents` | 생성 요약, 추천 유형과 이유, 액션 3단계, 휴식 안내, 공감 메시지의 암호문 | BE1 저장, BE2 읽기. 걱정과 1:1이며 같은 트랜잭션에서 저장한다. 공개 응답의 `summary`는 사용자 수정본을 우선하고 `analysis.summary`는 AI 생성본을 유지한다. |
 | `activities`, `activity_feedback`, `reflections` | 걱정별 활동 이력, 활동별 선택 평가, 대상 걱정별 회고 응답 | BE2 검토안. 활동은 걱정별로 여러 건을 보존한다. 완료와 평가는 별도 저장한다. 회고가 참조하는 걱정은 실제 회고 대상이다. 오늘 건너뛰기의 사용자·현지 날짜 저장과 이어하기 제약은 BE2가 설계한다. |
 | `deletion_records` | 삭제 대상의 유형·ID, 소유권 확인에 필요한 최소 참조, 상태·시각 | BE2 검토안. 내용 없는 이력을 30일 보관한다. 개별 삭제 완료 재확인과 부분 실패 재처리에 사용한다. 전체 삭제 완료 후 인증을 폐기할 수 있도록 별도 수명으로 관리한다. |

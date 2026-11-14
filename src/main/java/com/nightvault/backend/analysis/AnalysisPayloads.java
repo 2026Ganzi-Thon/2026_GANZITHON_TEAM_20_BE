@@ -12,12 +12,13 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.nightvault.backend.api.ApiError;
+import com.nightvault.backend.api.BusinessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
 @Component
-class AnalysisPayloads {
+public class AnalysisPayloads {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int NONCE_LENGTH = 12;
     private static final int TAG_BITS = 128;
@@ -66,17 +67,52 @@ class AnalysisPayloads {
     }
 
     WorryInput decryptInput(UUID requestId, byte[] encrypted) {
+        return json.readValue(decrypt("input:" + requestId, encrypted), WorryInput.class);
+    }
+
+    byte[] encryptContent(UUID requestId, AnalysisContent content) {
+        return encrypt("content:" + requestId, json.writeValueAsBytes(content));
+    }
+
+    public StoredInput readStoredInput(UUID requestId, byte[] encrypted) {
+        var input = decryptInput(requestId, encrypted);
+        return new StoredInput(input.text(), input.anxiety(), input.memo());
+    }
+
+    public AnalysisContent decryptContent(UUID requestId, byte[] encrypted) {
+        return json.readValue(decrypt("content:" + requestId, encrypted), AnalysisContent.class);
+    }
+
+    public byte[] encryptEditedSummary(UUID worryId, String summary) {
+        return encrypt("edit:" + worryId, json.writeValueAsBytes(summary));
+    }
+
+    public String decryptEditedSummary(UUID worryId, byte[] encrypted) {
+        return json.readValue(decrypt("edit:" + worryId, encrypted), String.class);
+    }
+
+    public byte[] encryptAnxietyAfter(UUID worryId, int anxiety) {
+        if (anxiety < 1 || anxiety > 5) {
+            throw new BusinessException(ApiError.INVALID_INPUT);
+        }
+        return encrypt("anxiety-after:" + worryId, json.writeValueAsBytes(anxiety));
+    }
+
+    public int decryptAnxietyAfter(UUID worryId, byte[] encrypted) {
+        return json.readValue(decrypt("anxiety-after:" + worryId, encrypted), Integer.class);
+    }
+
+    private byte[] decrypt(String purpose, byte[] encrypted) {
         requireKey();
+        if (encrypted == null || encrypted.length <= NONCE_LENGTH + TAG_BITS / Byte.SIZE) {
+            throw new IllegalArgumentException("Invalid encrypted analysis payload");
+        }
         ByteBuffer buffer = ByteBuffer.wrap(encrypted);
         byte[] nonce = new byte[NONCE_LENGTH];
         buffer.get(nonce);
         byte[] ciphertext = new byte[buffer.remaining()];
         buffer.get(ciphertext);
-        return json.readValue(crypt(Cipher.DECRYPT_MODE, "input:" + requestId, nonce, ciphertext), WorryInput.class);
-    }
-
-    byte[] encryptContent(UUID requestId, AnalysisContent content) {
-        return encrypt("content:" + requestId, json.writeValueAsBytes(content));
+        return crypt(Cipher.DECRYPT_MODE, purpose, nonce, ciphertext);
     }
 
     private byte[] encrypt(String purpose, byte[] plaintext) {
@@ -100,7 +136,7 @@ class AnalysisPayloads {
 
     private void requireKey() {
         if (!configured()) {
-            throw new AnalysisException(ApiError.TEMPORARILY_UNAVAILABLE);
+            throw new BusinessException(ApiError.TEMPORARILY_UNAVAILABLE);
         }
     }
 
@@ -117,4 +153,6 @@ class AnalysisPayloads {
     private static byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
     }
+
+    public record StoredInput(String text, int anxiety, String memo) {}
 }

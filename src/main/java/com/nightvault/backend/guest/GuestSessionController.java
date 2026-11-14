@@ -8,16 +8,12 @@ import java.util.Map;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
-import org.springframework.transaction.TransactionException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -76,16 +72,6 @@ class GuestSessionController {
         String cookie = GuestSessionCookie.read(request);
         var session = sessions.refresh(cookie);
         return session.isPresent() ? sessionResponse(session.get()) : ApiError.unauthenticated(cookie).response();
-    }
-
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    ResponseEntity<ApiError.Body> invalidRequest() {
-        return ApiError.INVALID_INPUT.response();
-    }
-
-    @ExceptionHandler({DataAccessException.class, TransactionException.class})
-    ResponseEntity<ApiError.Body> databaseUnavailable() {
-        return ApiError.TEMPORARILY_UNAVAILABLE.response();
     }
 
     private ResponseEntity<SessionResponse> sessionResponse(GuestSessionService.SessionCookie session) {

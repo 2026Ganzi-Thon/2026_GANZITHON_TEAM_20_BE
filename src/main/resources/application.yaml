@@ -5,6 +5,10 @@ spring:
     import: "optional:file:./.env[.properties]"
   profiles:
     active: "${SPRING_PROFILES_ACTIVE:}"
+  task:
+    scheduling:
+      pool:
+        size: 3
 server:
   servlet:
     session:

@@ -1,6 +1,7 @@
 package com.nightvault.backend.analysis;
 
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -13,6 +14,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import com.nightvault.backend.api.ApiError;
+import com.nightvault.backend.api.BusinessException;
+import com.nightvault.backend.guest.GuestWriteLock;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,23 +31,27 @@ class AnalysisRequests {
         FROM analysis_requests r
         JOIN guests g ON g.id = r.guest_id AND g.state = 'ACTIVE'
         LEFT JOIN worries w ON w.request_id = r.id AND w.deletion_started_at IS NULL
-            AND w.expires_at > statement_timestamp()
+            AND w.expires_at > :now
         WHERE r.guest_id = :guestId
         """;
 
     private final JdbcClient jdbc;
+    private final GuestWriteLock guestWriteLock;
     private final AnalysisPayloads payloads;
+    private final Clock clock;
 
-    AnalysisRequests(JdbcClient jdbc, AnalysisPayloads payloads) {
+    AnalysisRequests(JdbcClient jdbc, AnalysisPayloads payloads, Clock clock, GuestWriteLock guestWriteLock) {
         this.jdbc = jdbc;
+        this.guestWriteLock = guestWriteLock;
         this.payloads = payloads;
+        this.clock = clock;
     }
 
     @Transactional
     public Submission submit(UUID guestId, UUID key, UUID context, WorryInput input) {
-        lockGuest(guestId);
+        guestWriteLock.requireActive(guestId, ApiError.GUEST_SESSION_INVALID);
         var now = now();
-        var existing = requestQuery(" AND r.submission_key = :key")
+        var existing = requestQuery(" AND r.submission_key = :key", now)
             .param("guestId", guestId).param("key", key).query(AnalysisRequests::readRequest).optional();
         if (existing.isPresent()) {
             var request = existing.get();
@@ -68,14 +75,15 @@ class AnalysisRequests {
     }
 
     AnalysisStatus get(UUID guestId, UUID requestId, UUID context) {
-        return status(find(guestId, requestId), context, now().toInstant());
+        var now = now();
+        return status(find(guestId, requestId, now), context, now.toInstant());
     }
 
     @Transactional
     public Submission retry(UUID guestId, UUID requestId, UUID key, UUID context, WorryInput input) {
-        lockGuest(guestId);
+        guestWriteLock.requireActive(guestId, ApiError.GUEST_SESSION_INVALID);
         var now = now();
-        var request = find(guestId, requestId);
+        var request = find(guestId, requestId, now);
         var retry = jdbc.sql("""
             SELECT fingerprint FROM analysis_retries WHERE request_id = :id AND retry_key = :key
             """).param("id", requestId).param("key", key)
@@ -86,7 +94,7 @@ class AnalysisRequests {
 
         var current = status(request, context, now.toInstant());
         if (!current.status().equals("FAILED")) {
-            throw new AnalysisException(ApiError.RETRY_NOT_ALLOWED);
+            throw new BusinessException(ApiError.RETRY_NOT_ALLOWED);
         }
         WorryInput.validatePublication(input.publishAt(), now.toInstant(), request.expiresAt());
         jdbc.sql("""
@@ -108,7 +116,7 @@ class AnalysisRequests {
 
     DefaultPublication defaultPublication(UUID guestId, String timeZone) {
         if (timeZone.length() > 100 || !ZoneId.getAvailableZoneIds().contains(timeZone)) {
-            throw new AnalysisException(ApiError.INVALID_INPUT);
+            throw new BusinessException(ApiError.INVALID_INPUT);
         }
         var zone = ZoneId.of(timeZone);
         LocalTime time = jdbc.sql("""
@@ -135,58 +143,51 @@ class AnalysisRequests {
         }
     }
 
-    private RequestRow find(UUID guestId, UUID requestId) {
-        return requestQuery(" AND r.id = :id").param("guestId", guestId).param("id", requestId)
+    private RequestRow find(UUID guestId, UUID requestId, OffsetDateTime now) {
+        return requestQuery(" AND r.id = :id", now).param("guestId", guestId).param("id", requestId)
             .query(AnalysisRequests::readRequest).optional()
-            .orElseThrow(() -> new AnalysisException(ApiError.NOT_FOUND));
+            .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND));
     }
 
-    private JdbcClient.StatementSpec requestQuery(String condition) {
-        return jdbc.sql(REQUEST_STATE + condition);
-    }
-
-    private void lockGuest(UUID guestId) {
-        // Serializes submit/retry per guest and matches the worker's guest-first lock order.
-        jdbc.sql("SELECT id FROM guests WHERE id = :id AND state = 'ACTIVE' FOR UPDATE")
-            .param("id", guestId).query(UUID.class).optional()
-            .orElseThrow(() -> new AnalysisException(ApiError.GUEST_SESSION_INVALID));
+    private JdbcClient.StatementSpec requestQuery(String condition, OffsetDateTime now) {
+        return jdbc.sql(REQUEST_STATE + condition).param("now", now);
     }
 
     private Submission replay(RequestRow request, byte[] fingerprint, WorryInput input, UUID context, Instant now) {
         AnalysisStatus current = status(request, context, now);
         if (fingerprint != null && !MessageDigest.isEqual(fingerprint, payloads.fingerprint(input))) {
-            throw new AnalysisException(ApiError.IDEMPOTENCY_CONFLICT);
+            throw new BusinessException(ApiError.IDEMPOTENCY_CONFLICT);
         }
         return new Submission(current, false);
     }
 
     private AnalysisStatus status(RequestRow request, UUID context, Instant now) {
         if (!now.isBefore(request.expiresAt())) {
-            throw new AnalysisException(ApiError.NOT_FOUND);
+            throw new BusinessException(ApiError.NOT_FOUND);
         }
         return switch (request.state()) {
             case "QUEUED", "RUNNING" -> AnalysisStatus.pending(request.id(), request.acceptedAt());
             case "SUCCEEDED" -> {
                 if (request.worryId() == null) {
-                    throw new AnalysisException(ApiError.NOT_FOUND);
+                    throw new BusinessException(ApiError.NOT_FOUND);
                 }
                 yield AnalysisStatus.succeeded(request.id(), request.acceptedAt(), request.worryId(),
                     request.sealedAt(), request.publishAt());
             }
             case "FAILED" -> {
                 if (!now.isBefore(request.acceptedAt().plus(FAILED_VISIBILITY))) {
-                    throw new AnalysisException(ApiError.NOT_FOUND);
+                    throw new BusinessException(ApiError.NOT_FOUND);
                 }
                 yield AnalysisStatus.failed(request.id(), request.acceptedAt());
             }
             case "SUPPORT_GUIDANCE" -> {
                 if (context == null || request.guidanceUntil() == null || !now.isBefore(request.guidanceUntil())
                     || !MessageDigest.isEqual(request.contextHash(), payloads.contextHash(context))) {
-                    throw new AnalysisException(ApiError.NOT_FOUND);
+                    throw new BusinessException(ApiError.NOT_FOUND);
                 }
                 yield AnalysisStatus.guidance(request.id(), request.acceptedAt());
             }
-            default -> throw new AnalysisException(ApiError.NOT_FOUND);
+            default -> throw new BusinessException(ApiError.NOT_FOUND);
         };
     }
 
@@ -202,8 +203,8 @@ class AnalysisRequests {
         return value == null ? null : value.toInstant();
     }
 
-    private static OffsetDateTime now() {
-        return utc(Instant.now().truncatedTo(ChronoUnit.MICROS));
+    private OffsetDateTime now() {
+        return utc(clock.instant().truncatedTo(ChronoUnit.MICROS));
     }
 
     private static OffsetDateTime utc(Instant instant) {

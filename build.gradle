@@ -21,6 +21,13 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation('nl.martijndwars:web-push:5.1.2') {
+        exclude group: 'org.bouncycastle'
+        exclude group: 'org.asynchttpclient'
+    }
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.84'
+    implementation 'org.apache.httpcomponents:httpclient:4.5.14'
+    implementation 'org.bitbucket.b_c:jose4j:0.9.6'
     runtimeOnly 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
 
