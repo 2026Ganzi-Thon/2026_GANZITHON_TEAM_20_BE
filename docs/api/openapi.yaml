@@ -5,13 +5,14 @@ info:
   description: |-
     공동 검토용 1차 초안. 게스트 인증부터 걱정 접수·봉인·공개와 개별 삭제 경계를 다룬다. 프런트엔드는 같은 출처의 Spring API를 호출한다는 가정이다.
     인증·걱정·상태 응답에는 Cache-Control: no-store를 적용한다. 시간은 RFC 3339 형식이며 서버가 UTC로 반환한다. 15초 지연과 30초 후 화면 이동은 UI 정책이며 API 실패 상태와 독립적이다.
-    아이디는 소유권 검사를 대체하지 않는다. 다른 게스트의 대상, 삭제·만료된 대상을 조회하면 404를 반환한다. 공통 오류에는 원문·메모·토큰·AI 응답을 포함하지 않는다. 활동·회고·알림·전체 삭제의 세부 API는 공동 합의 후 확장한다.
+    아이디는 소유권 검사를 대체하지 않는다. 다른 게스트의 대상, 삭제·만료된 대상을 조회하면 404를 반환한다. 공통 오류에는 원문·메모·토큰·AI 응답을 포함하지 않는다. 활동 API(Activity 태그)는 BE2 설계 초안 기준이다. 회고·알림·전체 삭제의 세부 API는 공동 합의 후 확장한다.
 servers:
 - url: /api/v1
 tags:
 - name: Guest
 - name: Analysis
 - name: Vault
+- name: Activity
 security:
 - guestCookie: []
 paths:
@@ -689,6 +690,590 @@ paths:
           $ref: '#/components/responses/Unavailable'
         '400':
           $ref: '#/components/responses/InvalidInput'
+  /worries/{worryId}/activities:
+    parameters:
+    - $ref: '#/components/parameters/WorryId'
+    post:
+      tags: [Activity]
+      operationId: startActivity
+      summary: 도움 선택·활동 시작·도움 변경
+      description: |-
+        ACTION은 S-10 진입 시, REST는 "시작하기" 선택 시, EMPATHY는 S-12 진입 시 호출한다. REST "다음에 할게요"는 호출하지 않는다(활동을 만들지 않음).
+        SHRED는 받지 않는다. 파쇄는 삭제 확인 후 DELETE /worries/{worryId}만 호출한다.
+        같은 유형의 진행 중·일시정지 활동이 있으면 새로 만들지 않고 200으로 반환한다(startedAt 유지). 재전송·동시 요청에도 활동은 하나다.
+        중단된 ACTION이 있으면 같은 활동을 재개한다(체크 유지, 200). 중단·완료된 REST·EMPATHY와 완료된 ACTION은 새 활동으로 시작한다(REST는 새 180초).
+        다른 유형의 활동이 열려 있으면 409를 반환한다. 사용자가 변경을 확인하면 replaceOpen=true로 다시 호출하며, 서버가 한 트랜잭션에서 기존 활동을 중단하고 시작한다.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [helpType]
+              properties:
+                helpType:
+                  $ref: '#/components/schemas/ActivityHelpType'
+                replaceOpen:
+                  type: boolean
+                  default: false
+                  description: true면 다른 유형의 열린 활동을 중단하고 시작한다(M-05 도움 변경 확인).
+            examples:
+              start:
+                value:
+                  helpType: REST
+              replace:
+                value:
+                  helpType: ACTION
+                  replaceOpen: true
+      responses:
+        '201':
+          description: 새 활동 시작
+          headers:
+            Location:
+              description: /api/v1/activities/{activityId}
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+              examples:
+                rest:
+                  value:
+                    activityId: 7a0b8e4c-5d1f-4f0e-9a51-3f0f3c2b9d10
+                    worryId: 1c25f56a-0b86-41d3-8f8c-2f7c19e7d842
+                    helpType: REST
+                    state: IN_PROGRESS
+                    startedAt: '2026-11-12T00:15:00Z'
+                    endedAt: null
+                    version: 0
+                    serverTime: '2026-11-12T00:15:00Z'
+                    action: null
+                    rest:
+                      durationSeconds: 180
+                      endsAt: '2026-11-12T00:18:00Z'
+                      remainingSeconds: 180
+                      timeOver: false
+                    feedback: null
+                    stoppedActivityId: null
+                    nextUnviewedExists: null
+        '200':
+          description: 같은 유형의 열린 활동 반환 또는 중단된 액션 재개. 본문은 201과 같다.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+              examples:
+                resumedAction:
+                  value:
+                    activityId: 5c2d1f0a-7b3e-4c6d-8e9f-0a1b2c3d4e5f
+                    worryId: 1c25f56a-0b86-41d3-8f8c-2f7c19e7d842
+                    helpType: ACTION
+                    state: IN_PROGRESS
+                    startedAt: '2026-11-11T23:05:00Z'
+                    endedAt: null
+                    version: 4
+                    serverTime: '2026-11-12T00:20:00Z'
+                    action:
+                      steps:
+                      - stepNo: 1
+                        done: true
+                      - stepNo: 2
+                        done: false
+                      - stepNo: 3
+                        done: true
+                      doneCount: 2
+                      canComplete: false
+                    rest: null
+                    feedback: null
+                    stoppedActivityId: 7a0b8e4c-5d1f-4f0e-9a51-3f0f3c2b9d10
+                    nextUnviewedExists: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 다른 유형의 열린 활동이 있거나 아직 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                OPEN_ACTIVITY_EXISTS:
+                  value:
+                    code: OPEN_ACTIVITY_EXISTS
+                    message: 진행 중인 도움이 있어요.
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/current:
+    get:
+      tags: [Activity]
+      operationId: getCurrentActivity
+      summary: 홈 이어하기
+      description: 진행 중·일시정지 활동 중 상태가 가장 최근에 바뀐 것 하나를 반환한다. 중단·완료 활동과 삭제·만료된 걱정의 활동은 제외한다. 체크 변경은 상태 변경이 아니다.
+        원문·요약은 반환하지 않는다.
+      responses:
+        '200':
+          description: 이어할 활동
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentActivity'
+              examples:
+                rest:
+                  value:
+                    activityId: 7a0b8e4c-5d1f-4f0e-9a51-3f0f3c2b9d10
+                    worryId: 1c25f56a-0b86-41d3-8f8c-2f7c19e7d842
+                    helpType: REST
+                    state: PAUSED
+                    serverTime: '2026-11-12T07:00:00Z'
+                    progress:
+                      remainingSeconds: 95
+                      timeOver: false
+                action:
+                  value:
+                    activityId: 5c2d1f0a-7b3e-4c6d-8e9f-0a1b2c3d4e5f
+                    worryId: 1c25f56a-0b86-41d3-8f8c-2f7c19e7d842
+                    helpType: ACTION
+                    state: IN_PROGRESS
+                    serverTime: '2026-11-12T07:00:00Z'
+                    progress:
+                      doneCount: 2
+                      totalSteps: 3
+        '204':
+          description: 이어할 활동 없음
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/{activityId}:
+    parameters:
+    - $ref: '#/components/parameters/ActivityId'
+    get:
+      tags: [Activity]
+      operationId: getActivity
+      summary: 활동 상태 복원
+      description: 화면 복귀·재진입 때 서버 상태를 다시 읽는다. 휴식 카운트다운은 기기 시각이 아니라 serverTime과 rest.remainingSeconds로 다시 시작한다.
+        단계 문구·휴식 안내·공감 메시지는 아직 포함하지 않는다(BE1 암호화 모듈 공유 후 추가).
+      responses:
+        '200':
+          description: 현재 활동 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+              examples:
+                restPaused:
+                  value:
+                    activityId: 7a0b8e4c-5d1f-4f0e-9a51-3f0f3c2b9d10
+                    worryId: 1c25f56a-0b86-41d3-8f8c-2f7c19e7d842
+                    helpType: REST
+                    state: PAUSED
+                    startedAt: '2026-11-12T00:15:00Z'
+                    endedAt: null
+                    version: 1
+                    serverTime: '2026-11-12T00:17:00Z'
+                    action: null
+                    rest:
+                      durationSeconds: 180
+                      endsAt: null
+                      remainingSeconds: 95
+                      timeOver: false
+                    feedback: null
+                    stoppedActivityId: null
+                    nextUnviewedExists: null
+                completedWithFeedback:
+                  value:
+                    activityId: 9d8c7b6a-5f4e-4d3c-2b1a-0f9e8d7c6b5a
+                    worryId: 1c25f56a-0b86-41d3-8f8c-2f7c19e7d842
+                    helpType: EMPATHY
+                    state: COMPLETED
+                    startedAt: '2026-11-12T00:15:00Z'
+                    endedAt: '2026-11-12T00:16:00Z'
+                    version: 1
+                    serverTime: '2026-11-12T00:20:00Z'
+                    action: null
+                    rest: null
+                    feedback:
+                      answer: HELPFUL
+                      answeredAt: '2026-11-12T00:16:30Z'
+                      updatedAt: '2026-11-12T00:16:30Z'
+                    stoppedActivityId: null
+                    nextUnviewedExists: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 아직 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/{activityId}/steps/{stepNo}:
+    parameters:
+    - $ref: '#/components/parameters/ActivityId'
+    - $ref: '#/components/parameters/StepNo'
+    put:
+      tags: [Activity]
+      operationId: putActionStep
+      summary: 액션 체크 저장·해제
+      description: 진행 중인 ACTION만 가능하다. 순서와 상관없이 체크하고 해제할 수 있다. 같은 값 재전송은 바꾸지 않고 200을 반환한다.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [done]
+              properties:
+                done:
+                  type: boolean
+            example:
+              done: true
+      responses:
+        '200':
+          description: 변경된 활동 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: ACTION이 아니거나 이미 중단·완료된 활동, 또는 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                INVALID_ACTIVITY_STATE:
+                  value:
+                    code: INVALID_ACTIVITY_STATE
+                    message: 지금 상태에서는 할 수 없어요.
+                ACTIVITY_ALREADY_ENDED:
+                  value:
+                    code: ACTIVITY_ALREADY_ENDED
+                    message: 이미 끝난 활동이에요.
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/{activityId}/pause:
+    parameters:
+    - $ref: '#/components/parameters/ActivityId'
+    post:
+      tags: [Activity]
+      operationId: pauseRest
+      summary: 휴식 일시정지
+      description: 진행 중인 REST만 가능하다. 남은 시간(올림 초)을 저장하고 endsAt을 비운다. 이미 일시정지면 200. 남은 시간이 0이면 상태를 바꾸지 않고 409를 반환한다.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: 일시정지된 활동 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 휴식 시간 종료, REST가 아님, 이미 중단·완료, 또는 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                REST_TIME_OVER:
+                  value:
+                    code: REST_TIME_OVER
+                    message: 휴식 시간이 끝났어요.
+                INVALID_ACTIVITY_STATE:
+                  value:
+                    code: INVALID_ACTIVITY_STATE
+                    message: 지금 상태에서는 할 수 없어요.
+                ACTIVITY_ALREADY_ENDED:
+                  value:
+                    code: ACTIVITY_ALREADY_ENDED
+                    message: 이미 끝난 활동이에요.
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/{activityId}/resume:
+    parameters:
+    - $ref: '#/components/parameters/ActivityId'
+    post:
+      tags: [Activity]
+      operationId: resumeRest
+      summary: 휴식 재개
+      description: 일시정지된 REST만 가능하다. endsAt = 서버 현재 + remainingSeconds로 다시 계산한다. 이미 진행 중이면 200.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: 재개된 활동 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: REST가 아님, 이미 중단·완료, 또는 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                INVALID_ACTIVITY_STATE:
+                  value:
+                    code: INVALID_ACTIVITY_STATE
+                    message: 지금 상태에서는 할 수 없어요.
+                ACTIVITY_ALREADY_ENDED:
+                  value:
+                    code: ACTIVITY_ALREADY_ENDED
+                    message: 이미 끝난 활동이에요.
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/{activityId}/stop:
+    parameters:
+    - $ref: '#/components/parameters/ActivityId'
+    post:
+      tags: [Activity]
+      operationId: stopActivity
+      summary: 활동 중단
+      description: 액션 "나중에 이어하기", 휴식 "그만두기"에서 호출한다. 확인창을 여는 것만으로는 호출하지 않는다. 액션 체크는 유지하고 휴식 남은 시간은 버린다. 이미 중단됐으면 200.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: 중단된 활동 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 이미 완료된 활동 또는 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                ACTIVITY_ALREADY_ENDED:
+                  value:
+                    code: ACTIVITY_ALREADY_ENDED
+                    message: 이미 끝난 활동이에요.
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/{activityId}/complete:
+    parameters:
+    - $ref: '#/components/parameters/ActivityId'
+    post:
+      tags: [Activity]
+      operationId: completeActivity
+      summary: 활동 완료
+      description: |-
+        사용자의 명시적 완료(액션 전체 완료, 휴식 완료, 공감 "읽었어요"). 서버 성공 응답 후 S-13으로 이동한다.
+        ACTION은 세 단계를 모두 체크해야, REST는 진행 중이고 남은 시간이 0이어야 완료된다. 휴식이 0초가 돼도 서버가 자동 완료하지 않는다.
+        이미 완료면 200(endedAt 유지). 완료와 중단이 동시에 오면 먼저 커밋한 요청이 이기고 나머지는 409다.
+        nextUnviewedExists는 현재 걱정 말고 아직 열어 보지 않은 공개 걱정이 있는지다("다음 걱정 보기" 표시).
+      security:
+      - guestCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: 완료된 활동 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+              examples:
+                rest:
+                  value:
+                    activityId: 7a0b8e4c-5d1f-4f0e-9a51-3f0f3c2b9d10
+                    worryId: 1c25f56a-0b86-41d3-8f8c-2f7c19e7d842
+                    helpType: REST
+                    state: COMPLETED
+                    startedAt: '2026-11-12T00:15:00Z'
+                    endedAt: '2026-11-12T00:19:10Z'
+                    version: 3
+                    serverTime: '2026-11-12T00:19:10Z'
+                    action: null
+                    rest:
+                      durationSeconds: 180
+                      endsAt: null
+                      remainingSeconds: null
+                      timeOver: false
+                    feedback: null
+                    stoppedActivityId: null
+                    nextUnviewedExists: true
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 완료 조건 미충족, 이미 중단된 활동, 또는 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                ACTION_STEPS_INCOMPLETE:
+                  value:
+                    code: ACTION_STEPS_INCOMPLETE
+                    message: 세 단계를 모두 마치면 완료할 수 있어요.
+                REST_NOT_FINISHED:
+                  value:
+                    code: REST_NOT_FINISHED
+                    message: 아직 휴식 시간이 남았어요.
+                ACTIVITY_ALREADY_ENDED:
+                  value:
+                    code: ACTIVITY_ALREADY_ENDED
+                    message: 이미 끝난 활동이에요.
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /activities/{activityId}/feedback:
+    parameters:
+    - $ref: '#/components/parameters/ActivityId'
+    put:
+      tags: [Activity]
+      operationId: putActivityFeedback
+      summary: 도움 평가 저장
+      description: |-
+        선택 입력이며 기본값이 없다. 평가하지 않으면 활동의 feedback은 null이다. 완료된 활동(ACTION·REST·EMPATHY)에만 저장한다.
+        다른 답을 보내면 덮어쓰고 updatedAt만 바뀐다(answeredAt 유지). 같은 답 재전송은 그대로 200.
+        걱정이 삭제 중이거나 만료됐으면 404이며 저장하지 않는다. 평가 실패는 활동 완료 상태에 영향을 주지 않는다.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [answer]
+              properties:
+                answer:
+                  $ref: '#/components/schemas/FeedbackAnswer'
+            example:
+              answer: HELPFUL
+      responses:
+        '200':
+          description: 저장된 평가
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedFeedback'
+              examples:
+                saved:
+                  value:
+                    activityId: 7a0b8e4c-5d1f-4f0e-9a51-3f0f3c2b9d10
+                    answer: HELPFUL
+                    answeredAt: '2026-11-12T00:19:30Z'
+                    updatedAt: '2026-11-12T00:19:30Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 완료하지 않은 활동(진행 중·일시정지·중단) 또는 잠긴 걱정
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                ACTIVITY_NOT_COMPLETED:
+                  value:
+                    code: ACTIVITY_NOT_COMPLETED
+                    message: 완료한 활동만 평가할 수 있어요.
+                WORRY_LOCKED:
+                  value:
+                    code: WORRY_LOCKED
+                    message: 아직 공개되지 않았어요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
 components:
   securitySchemes:
     guestCookie:
@@ -742,6 +1327,23 @@ components:
       schema:
         type: string
         format: uuid
+    ActivityId:
+      name: activityId
+      in: path
+      required: true
+      description: 활동 식별자
+      schema:
+        type: string
+        format: uuid
+    StepNo:
+      name: stepNo
+      in: path
+      required: true
+      description: 액션 단계 번호
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 3
   responses:
     InvalidInput:
       description: 요청 형식 또는 입력값 오류
@@ -1169,4 +1771,201 @@ components:
           anyOf:
           - type: string
             minLength: 1
+          - type: 'null'
+    ActivityHelpType:
+      type: string
+      enum: [ACTION, REST, EMPATHY]
+      description: 활동을 만드는 도움 유형. SHRED는 활동이 아니라 삭제다.
+    ActivityState:
+      type: string
+      enum: [IN_PROGRESS, PAUSED, STOPPED, COMPLETED]
+      description: PAUSED는 REST에만 있다. 시작 전은 활동이 없다.
+    Activity:
+      type: object
+      additionalProperties: false
+      required: [activityId, worryId, helpType, state, startedAt, endedAt, version, serverTime, action, rest, feedback,
+        stoppedActivityId, nextUnviewedExists]
+      properties:
+        activityId:
+          type: string
+          format: uuid
+        worryId:
+          type: string
+          format: uuid
+        helpType:
+          $ref: '#/components/schemas/ActivityHelpType'
+        state:
+          $ref: '#/components/schemas/ActivityState'
+        startedAt:
+          type: string
+          format: date-time
+          description: 최초 시작 시각. 재진입·액션 재개에도 바뀌지 않는다.
+        endedAt:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: STOPPED·COMPLETED일 때 마지막 중단·완료 시각
+        version:
+          type: integer
+          minimum: 0
+          description: 값이 바뀔 때마다 1씩 오른다.
+        serverTime:
+          type: string
+          format: date-time
+          description: 응답을 만든 서버 시각. 카운트다운 기준
+        action:
+          anyOf:
+          - $ref: '#/components/schemas/ActionProgress'
+          - type: 'null'
+          description: ACTION일 때만 값이 있다.
+        rest:
+          anyOf:
+          - $ref: '#/components/schemas/RestTimer'
+          - type: 'null'
+          description: REST일 때만 값이 있다.
+        feedback:
+          anyOf:
+          - $ref: '#/components/schemas/ActivityFeedback'
+          - type: 'null'
+          description: 완료된 활동의 도움 평가. 미평가·미완료면 null
+        stoppedActivityId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          description: 시작 요청에서 replaceOpen으로 중단된 활동. 그 외 null
+        nextUnviewedExists:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: 완료 응답에서만 값이 있다. 아직 열어 보지 않은 다른 공개 걱정이 있는지
+    ActionProgress:
+      type: object
+      additionalProperties: false
+      required: [steps, doneCount, canComplete]
+      properties:
+        steps:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepNo, done]
+            properties:
+              stepNo:
+                type: integer
+                minimum: 1
+                maximum: 3
+              done:
+                type: boolean
+        doneCount:
+          type: integer
+          minimum: 0
+          maximum: 3
+        canComplete:
+          type: boolean
+          description: 진행 중이고 세 단계를 모두 체크했으면 true
+    RestTimer:
+      type: object
+      additionalProperties: false
+      required: [durationSeconds, endsAt, remainingSeconds, timeOver]
+      properties:
+        durationSeconds:
+          type: integer
+          minimum: 1
+          description: 휴식 길이. 기본 180초
+        endsAt:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: 진행 중일 때만 값이 있다.
+        remainingSeconds:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          description: 진행 중이면 서버 시각 기준 남은 초(올림), 일시정지면 저장된 남은 초. 중단·완료면 null
+        timeOver:
+          type: boolean
+          description: 진행 중이고 남은 시간이 0이면 true. 서버는 이때도 자동 완료하지 않는다.
+    FeedbackAnswer:
+      type: string
+      enum: [HELPFUL, UNSURE, NOT_HELPFUL]
+      description: 도움 됨 / 잘 모르겠음 / 도움 안 됨
+    ActivityFeedback:
+      type: object
+      additionalProperties: false
+      required: [answer, answeredAt, updatedAt]
+      properties:
+        answer:
+          $ref: '#/components/schemas/FeedbackAnswer'
+        answeredAt:
+          type: string
+          format: date-time
+          description: 최초 응답 시각
+        updatedAt:
+          type: string
+          format: date-time
+          description: 마지막으로 답이 바뀐 시각
+    SavedFeedback:
+      type: object
+      additionalProperties: false
+      required: [activityId, answer, answeredAt, updatedAt]
+      properties:
+        activityId:
+          type: string
+          format: uuid
+        answer:
+          $ref: '#/components/schemas/FeedbackAnswer'
+        answeredAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CurrentActivity:
+      type: object
+      additionalProperties: false
+      required: [activityId, worryId, helpType, state, serverTime, progress]
+      properties:
+        activityId:
+          type: string
+          format: uuid
+        worryId:
+          type: string
+          format: uuid
+        helpType:
+          $ref: '#/components/schemas/ActivityHelpType'
+        state:
+          type: string
+          enum: [IN_PROGRESS, PAUSED]
+        serverTime:
+          type: string
+          format: date-time
+        progress:
+          description: ACTION은 체크 수, REST는 남은 시간, EMPATHY는 null
+          anyOf:
+          - type: object
+            additionalProperties: false
+            required: [doneCount, totalSteps]
+            properties:
+              doneCount:
+                type: integer
+                minimum: 0
+                maximum: 3
+              totalSteps:
+                type: integer
+                const: 3
+          - type: object
+            additionalProperties: false
+            required: [remainingSeconds, timeOver]
+            properties:
+              remainingSeconds:
+                type: integer
+                minimum: 0
+              timeOver:
+                type: boolean
           - type: 'null'

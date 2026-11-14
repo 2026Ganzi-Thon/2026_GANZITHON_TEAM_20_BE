@@ -22,6 +22,12 @@ import org.springframework.stereotype.Component;
  */
 @Component
 class WorryAccess {
+    /**
+     * 다른 테이블 조회에서 걱정(별칭 {@code w})을 거를 때 쓰는 조건: 공개됨·미삭제·미만료. {@code :now} 파라미터가 필요하다.
+     * 소유자 조건({@code guest_id})은 호출하는 쿼리가 넣는다.
+     */
+    static final String VISIBLE_WORRY = "w.deletion_started_at IS NULL AND w.expires_at > :now AND w.publish_at <= :now";
+
     private final JdbcClient jdbc;
 
     WorryAccess(JdbcClient jdbc) {

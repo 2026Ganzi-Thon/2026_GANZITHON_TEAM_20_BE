@@ -157,7 +157,8 @@ class ActivityAccessTest extends ActivityApiSupport {
             client::pause,
             client::resume,
             client::stop,
-            client::complete);
+            client::complete,
+            id -> client.feedback(id, "HELPFUL"));
     }
 
     static void assertNotFound(Response response) {

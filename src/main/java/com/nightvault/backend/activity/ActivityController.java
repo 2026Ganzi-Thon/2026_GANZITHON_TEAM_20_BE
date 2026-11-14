@@ -28,6 +28,7 @@ class ActivityController {
     private static final String ACTIVITIES = "/api/v1/activities";
     private static final Set<String> HELP_TYPES = Set.of("ACTION", "REST", "EMPATHY");
     private static final Set<String> STEP_NUMBERS = Set.of("1", "2", "3");
+    private static final Set<String> FEEDBACK_ANSWERS = Set.of("HELPFUL", "UNSURE", "NOT_HELPFUL");
 
     private final ActivityService activities;
 
@@ -54,6 +55,13 @@ class ActivityController {
             ? ResponseEntity.created(URI.create(ACTIVITIES + "/" + result.view().activityId()))
             : ResponseEntity.ok();
         return builder.cacheControl(CacheControl.noStore()).body(result.view());
+    }
+
+    @GetMapping(ACTIVITIES + "/current")
+    ResponseEntity<CurrentActivity> current(@AuthenticationPrincipal UUID guestId) {
+        return activities.current(guestId)
+            .map(current -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(current))
+            .orElseGet(() -> ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build());
     }
 
     @GetMapping(ACTIVITIES + "/{activityId}")
@@ -93,6 +101,21 @@ class ActivityController {
     @PostMapping(ACTIVITIES + "/{activityId}/complete")
     ResponseEntity<ActivityView> complete(@AuthenticationPrincipal UUID guestId, @PathVariable("activityId") String activityId) {
         return ok(activities.complete(guestId, uuid(activityId)));
+    }
+
+    @PutMapping(path = ACTIVITIES + "/{activityId}/feedback", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<ActivityFeedback.Saved> feedback(
+        @AuthenticationPrincipal UUID guestId,
+        @PathVariable("activityId") String activityId,
+        @RequestBody JsonNode body
+    ) {
+        if (!body.isObject() || body.size() != 1 || !body.has("answer") || !body.get("answer").isString()
+            || !FEEDBACK_ANSWERS.contains(body.get("answer").asString())) {
+            throw new ActivityException(ApiError.INVALID_INPUT);
+        }
+        var saved = activities.saveFeedback(guestId, uuid(activityId),
+            ActivityFeedback.Answer.valueOf(body.get("answer").asString()));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(saved);
     }
 
     @ExceptionHandler(ActivityException.class)

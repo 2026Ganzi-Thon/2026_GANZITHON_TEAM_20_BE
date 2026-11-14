@@ -1,5 +1,6 @@
 package com.nightvault.backend.activity;
 
+import java.time.Duration;
 import java.util.UUID;
 
 import com.nightvault.backend.support.IntegrationTest;
@@ -74,6 +75,23 @@ abstract class ActivityApiSupport extends IntegrationTest {
             throw new AssertionError("시작 실패: " + response);
         }
         return response.activityId();
+    }
+
+    /** 바로 완료할 수 있게 만든 뒤 완료한 활동. 휴식은 시계를 180초 넘긴다. */
+    UUID completedId(Client client, TestWorry worry, String helpType) {
+        UUID id = startedId(client, worry, helpType);
+        if (helpType.equals("ACTION")) {
+            for (int stepNo = 1; stepNo <= 3; stepNo++) {
+                client.step(id, stepNo, true);
+            }
+        } else if (helpType.equals("REST")) {
+            clock.advance(Duration.ofSeconds(180));
+        }
+        Response completed = client.complete(id);
+        if (completed.status() != 200) {
+            throw new AssertionError("완료 실패: " + completed);
+        }
+        return id;
     }
 
     long activityCount(TestWorry worry) {
@@ -153,6 +171,14 @@ abstract class ActivityApiSupport extends IntegrationTest {
 
         Response complete(UUID id) {
             return post("/api/v1/activities/" + id + "/complete");
+        }
+
+        Response feedback(UUID id, String answer) {
+            return put("/api/v1/activities/" + id + "/feedback", "{\"answer\":\"" + answer + "\"}");
+        }
+
+        Response current() {
+            return get("/api/v1/activities/current");
         }
 
         private MockHttpServletRequestBuilder withBody(MockHttpServletRequestBuilder builder, String body) {
