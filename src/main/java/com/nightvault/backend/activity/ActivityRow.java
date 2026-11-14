@@ -86,4 +86,10 @@ record ActivityRow(
             startedAt, lastStartedAt, now, null, null, null, null,
             restDurationSeconds, now.plusSeconds(restRemainingSeconds), null, version + 1);
     }
+
+    ActivityRow complete(Instant now) {
+        return new ActivityRow(id, guestId, worryId, helpType, ActivityState.COMPLETED,
+            startedAt, lastStartedAt, now, now, step1Done, step2Done, step3Done,
+            restDurationSeconds, null, null, version + 1);
+    }
 }

@@ -144,6 +144,57 @@ class ActivityService {
         return ActivityView.of(updated, now);
     }
 
+    /** 중단(ACT-03 나중에 이어하기, REST-04 그만두기). 액션 체크는 유지하고 휴식 남은 시간은 버린다. */
+    @Transactional
+    ActivityView stop(UUID guestId, UUID activityId) {
+        Instant now = now();
+        ActivityRow row = lockForWrite(guestId, activityId, now);
+        if (row.state() == ActivityState.STOPPED) {
+            return ActivityView.of(row, now);
+        }
+        if (row.state() == ActivityState.COMPLETED) {
+            throw new ActivityException(ApiError.ACTIVITY_ALREADY_ENDED);
+        }
+        ActivityRow updated = row.stop(now);
+        store.update(updated);
+        return ActivityView.of(updated, now);
+    }
+
+    /**
+     * 사용자의 명시적 완료(ACT-04, REST-04, EMP-02). 액션은 3단계 모두 체크, 휴식은 시간 종료 후에만 가능하다.
+     * 응답에 다음 미확인 걱정 존재 여부(RESULT-03)를 넣는다.
+     */
+    @Transactional
+    ActivityView complete(UUID guestId, UUID activityId) {
+        Instant now = now();
+        ActivityRow row = lockForWrite(guestId, activityId, now);
+        ActivityRow result = row;
+        if (row.state() != ActivityState.COMPLETED) {
+            if (row.state() == ActivityState.STOPPED) {
+                throw new ActivityException(ApiError.ACTIVITY_ALREADY_ENDED);
+            }
+            switch (row.helpType()) {
+                case ACTION -> {
+                    if (!row.allStepsDone()) {
+                        throw new ActivityException(ApiError.ACTION_STEPS_INCOMPLETE);
+                    }
+                }
+                case REST -> {
+                    if (row.state() == ActivityState.PAUSED || row.remainingSeconds(now) > 0) {
+                        throw new ActivityException(ApiError.REST_NOT_FINISHED);
+                    }
+                }
+                case EMPATHY -> {
+                    // "읽었어요"는 조건 없이 완료한다.
+                }
+            }
+            result = row.complete(now);
+            store.update(result);
+        }
+        return ActivityView.of(result, now)
+            .withNextUnviewedExists(worries.otherUnviewedExists(guestId, row.worryId(), now));
+    }
+
     // ---- 내부 ----
 
     /** 활동 쓰기 공통: 소유 확인 → 게스트·걱정 잠금(접근 검사) → 활동 잠금. */

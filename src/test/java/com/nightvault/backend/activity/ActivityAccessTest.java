@@ -155,7 +155,9 @@ class ActivityAccessTest extends ActivityApiSupport {
             client::activity,
             id -> client.step(id, 1, true),
             client::pause,
-            client::resume);
+            client::resume,
+            client::stop,
+            client::complete);
     }
 
     static void assertNotFound(Response response) {

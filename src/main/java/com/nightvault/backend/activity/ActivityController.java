@@ -85,6 +85,16 @@ class ActivityController {
         return ok(activities.resume(guestId, uuid(activityId)));
     }
 
+    @PostMapping(ACTIVITIES + "/{activityId}/stop")
+    ResponseEntity<ActivityView> stop(@AuthenticationPrincipal UUID guestId, @PathVariable("activityId") String activityId) {
+        return ok(activities.stop(guestId, uuid(activityId)));
+    }
+
+    @PostMapping(ACTIVITIES + "/{activityId}/complete")
+    ResponseEntity<ActivityView> complete(@AuthenticationPrincipal UUID guestId, @PathVariable("activityId") String activityId) {
+        return ok(activities.complete(guestId, uuid(activityId)));
+    }
+
     @ExceptionHandler(ActivityException.class)
     ResponseEntity<ApiError.Body> activityError(ActivityException exception) {
         return exception.error().response();
