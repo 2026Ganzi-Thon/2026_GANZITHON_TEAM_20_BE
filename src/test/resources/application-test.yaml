@@ -1,0 +1,5 @@
+# 통합 테스트 전용 프로필. 데이터소스는 IntegrationTest의 Testcontainers(@ServiceConnection)가 주입한다.
+# LocalAnalysisWorker는 @Profile("local")이라 이 프로필에서는 등록되지 않는다(스케줄러도 꺼짐).
+
+# 테스트용 고정 데이터 키 (Base64 "test-only-nightvault-data-key-32", 32바이트). 운영·로컬 키로 쓰지 않는다.
+NIGHTVAULT_DATA_KEY: "dGVzdC1vbmx5LW5pZ2h0dmF1bHQtZGF0YS1rZXktMzI="
