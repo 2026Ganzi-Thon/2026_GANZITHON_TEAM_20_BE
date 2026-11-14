@@ -47,6 +47,25 @@ class ActivityStore {
             .query(ActivityStore::map).optional();
     }
 
+    /** HOME-03: 게스트의 열린 활동 중 상태가 가장 최근에 바뀐 것. 볼 수 없는 걱정의 활동은 뺀다. */
+    Optional<ActivityRow> findCurrent(UUID guestId, Instant now) {
+        return jdbc.sql("""
+                SELECT a.id, a.guest_id, a.worry_id, a.help_type, a.state, a.started_at, a.last_started_at,
+                       a.state_changed_at, a.ended_at, a.step1_done, a.step2_done, a.step3_done,
+                       a.rest_duration_seconds, a.rest_ends_at, a.rest_remaining_seconds, a.version
+                FROM activities a
+                JOIN worries w ON w.id = a.worry_id AND w.guest_id = a.guest_id
+                WHERE a.guest_id = :guestId
+                  AND a.state IN ('IN_PROGRESS', 'PAUSED')
+                  AND %s
+                ORDER BY a.state_changed_at DESC, a.id DESC
+                LIMIT 1
+                """.formatted(WorryAccess.VISIBLE_WORRY))
+            .param("guestId", guestId)
+            .param("now", utc(now))
+            .query(ActivityStore::map).optional();
+    }
+
     /** 같은 걱정의 열린(진행 중·일시정지) 활동. 부분 유일 인덱스로 최대 하나다. */
     Optional<ActivityRow> lockOpen(UUID worryId) {
         return jdbc.sql("SELECT " + COLUMNS + """

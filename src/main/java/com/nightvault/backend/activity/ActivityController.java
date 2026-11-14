@@ -57,6 +57,13 @@ class ActivityController {
         return builder.cacheControl(CacheControl.noStore()).body(result.view());
     }
 
+    @GetMapping(ACTIVITIES + "/current")
+    ResponseEntity<CurrentActivity> current(@AuthenticationPrincipal UUID guestId) {
+        return activities.current(guestId)
+            .map(current -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(current))
+            .orElseGet(() -> ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build());
+    }
+
     @GetMapping(ACTIVITIES + "/{activityId}")
     ResponseEntity<ActivityView> get(@AuthenticationPrincipal UUID guestId, @PathVariable("activityId") String activityId) {
         return ok(activities.get(guestId, uuid(activityId)));

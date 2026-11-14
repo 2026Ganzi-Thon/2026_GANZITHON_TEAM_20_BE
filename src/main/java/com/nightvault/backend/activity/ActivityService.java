@@ -95,6 +95,13 @@ class ActivityService {
         return withFeedback(ActivityView.of(store.find(guestId, activityId).orElseThrow(ActivityService::notFound), now));
     }
 
+    /** 홈 이어하기(HOME-03). 상태가 가장 최근에 바뀐 진행 중·일시정지 활동 하나. 중단·완료는 나오지 않는다. */
+    @Transactional(readOnly = true)
+    Optional<CurrentActivity> current(UUID guestId) {
+        Instant now = now();
+        return store.findCurrent(guestId, now).map(row -> CurrentActivity.of(row, now));
+    }
+
     /** 액션 체크 저장·해제(ACT-02). 순서 자유, 같은 값 재전송은 멱등. 진행 중 액션만. */
     @Transactional
     ActivityView setStep(UUID guestId, UUID activityId, int stepNo, boolean done) {
