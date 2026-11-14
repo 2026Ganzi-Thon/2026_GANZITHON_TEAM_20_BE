@@ -13,13 +13,14 @@ import com.nightvault.backend.activity.ActivityRow.HelpType;
  *
  * <p>단계 문구·휴식 안내·공감 메시지(ai_contents)는 BE1 암호화 모듈을 공유한 뒤 추가한다.</p>
  *
+ * @param feedback 완료된 활동의 도움 평가(RESULT-02). 미평가·미완료면 null
  * @param stoppedActivityId 도움 변경(M-05)으로 이번 요청에서 중단된 활동. 그 외 null
  * @param nextUnviewedExists 완료 응답에서만 채운다(RESULT-03). 그 외 null
  */
 record ActivityView(
     UUID activityId, UUID worryId, HelpType helpType, ActivityState state,
     Instant startedAt, Instant endedAt, int version, Instant serverTime,
-    ActionProgress action, RestTimer rest,
+    ActionProgress action, RestTimer rest, ActivityFeedback feedback,
     UUID stoppedActivityId, Boolean nextUnviewedExists
 ) {
     static ActivityView of(ActivityRow row, Instant now) {
@@ -27,17 +28,22 @@ record ActivityView(
             row.startedAt(), row.endedAt(), row.version(), now,
             row.helpType() == HelpType.ACTION ? ActionProgress.of(row) : null,
             row.helpType() == HelpType.REST ? RestTimer.of(row, now) : null,
-            null, null);
+            null, null, null);
     }
 
     ActivityView withStoppedActivityId(UUID value) {
         return new ActivityView(activityId, worryId, helpType, state, startedAt, endedAt, version, serverTime,
-            action, rest, value, nextUnviewedExists);
+            action, rest, feedback, value, nextUnviewedExists);
     }
 
     ActivityView withNextUnviewedExists(boolean value) {
         return new ActivityView(activityId, worryId, helpType, state, startedAt, endedAt, version, serverTime,
-            action, rest, stoppedActivityId, value);
+            action, rest, feedback, stoppedActivityId, value);
+    }
+
+    ActivityView withFeedback(ActivityFeedback value) {
+        return new ActivityView(activityId, worryId, helpType, state, startedAt, endedAt, version, serverTime,
+            action, rest, value, stoppedActivityId, nextUnviewedExists);
     }
 
     record ActionProgress(List<Step> steps, int doneCount, boolean canComplete) {

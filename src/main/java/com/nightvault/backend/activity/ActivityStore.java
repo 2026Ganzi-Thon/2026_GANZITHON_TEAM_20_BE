@@ -114,6 +114,31 @@ class ActivityStore {
             .update();
     }
 
+    Optional<ActivityFeedback> findFeedback(UUID activityId) {
+        return jdbc.sql("SELECT answer, answered_at, updated_at FROM activity_feedback WHERE activity_id = :id")
+            .param("id", activityId)
+            .query(ActivityStore::mapFeedback).optional();
+    }
+
+    /** 평가 저장. 처음이면 만들고, 이미 있으면 답과 {@code updated_at}만 바꾼다({@code answered_at} 유지). */
+    ActivityFeedback saveFeedback(UUID activityId, ActivityFeedback.Answer answer, Instant now) {
+        return jdbc.sql("""
+                INSERT INTO activity_feedback (activity_id, answer, answered_at, updated_at)
+                VALUES (:id, :answer, :now, :now)
+                ON CONFLICT (activity_id) DO UPDATE SET answer = EXCLUDED.answer, updated_at = EXCLUDED.updated_at
+                RETURNING answer, answered_at, updated_at
+                """)
+            .param("id", activityId)
+            .param("answer", answer.name())
+            .param("now", utc(now))
+            .query(ActivityStore::mapFeedback).single();
+    }
+
+    private static ActivityFeedback mapFeedback(ResultSet row, int rowNumber) throws SQLException {
+        return new ActivityFeedback(ActivityFeedback.Answer.valueOf(row.getString("answer")),
+            instant(row, "answered_at"), instant(row, "updated_at"));
+    }
+
     private static ActivityRow map(ResultSet row, int rowNumber) throws SQLException {
         return new ActivityRow(
             row.getObject("id", UUID.class),

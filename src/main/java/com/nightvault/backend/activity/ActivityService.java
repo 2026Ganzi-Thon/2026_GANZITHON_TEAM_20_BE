@@ -92,7 +92,7 @@ class ActivityService {
         Instant now = now();
         UUID worryId = store.findWorryId(guestId, activityId).orElseThrow(ActivityService::notFound);
         worries.check(guestId, worryId, now);
-        return ActivityView.of(store.find(guestId, activityId).orElseThrow(ActivityService::notFound), now);
+        return withFeedback(ActivityView.of(store.find(guestId, activityId).orElseThrow(ActivityService::notFound), now));
     }
 
     /** 액션 체크 저장·해제(ACT-02). 순서 자유, 같은 값 재전송은 멱등. 진행 중 액션만. */
@@ -191,11 +191,37 @@ class ActivityService {
             result = row.complete(now);
             store.update(result);
         }
-        return ActivityView.of(result, now)
+        return withFeedback(ActivityView.of(result, now))
             .withNextUnviewedExists(worries.otherUnviewedExists(guestId, row.worryId(), now));
     }
 
+    /**
+     * 도움 평가 저장(RESULT-02). 완료된 활동에만 저장하고, 다시 보내면 답을 덮어쓴다(같은 답이면 그대로).
+     * 활동 완료와 다른 트랜잭션이라 평가가 실패해도 완료 상태는 바뀌지 않는다.
+     */
+    @Transactional
+    ActivityFeedback.Saved saveFeedback(UUID guestId, UUID activityId, ActivityFeedback.Answer answer) {
+        Instant now = now();
+        ActivityRow row = lockForWrite(guestId, activityId, now);
+        if (row.state() != ActivityState.COMPLETED) {
+            throw new ActivityException(ApiError.ACTIVITY_NOT_COMPLETED);
+        }
+        Optional<ActivityFeedback> existing = store.findFeedback(activityId);
+        if (existing.isPresent() && existing.get().answer() == answer) {
+            return ActivityFeedback.Saved.of(activityId, existing.get());
+        }
+        return ActivityFeedback.Saved.of(activityId, store.saveFeedback(activityId, answer, now));
+    }
+
     // ---- 내부 ----
+
+    /** 완료된 활동이면 평가를 붙인다. 미완료 활동은 평가가 있을 수 없다. */
+    private ActivityView withFeedback(ActivityView view) {
+        if (view.state() != ActivityState.COMPLETED) {
+            return view;
+        }
+        return view.withFeedback(store.findFeedback(view.activityId()).orElse(null));
+    }
 
     /** 활동 쓰기 공통: 소유 확인 → 게스트·걱정 잠금(접근 검사) → 활동 잠금. */
     private ActivityRow lockForWrite(UUID guestId, UUID activityId, Instant now) {
