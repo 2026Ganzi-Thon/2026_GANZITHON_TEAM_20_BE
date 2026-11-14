@@ -54,11 +54,13 @@ macOS와 Linux에서는 `./gradlew`를 사용한다. Windows에서 최초 Git �
 
 ## 걱정 접수 로컬 확인
 
+금고·활동·회고·삭제와 알림 연동은 [5·6단계 백엔드 API](api/stage5-6.md)를 참고한다.
+
 Spring 시작 시 Flyway V2가 분석 요청·재시도·걱정·AI 결과 테이블을 만든다. 원문과 분석 결과의 복호화에는 데이터를 저장할 때의 `NIGHTVAULT_DATA_KEY`를 사용한다.
 
 게스트 세션을 만든 뒤 CSRF 토큰을 다시 조회한다. 걱정 제출에는 `Idempotency-Key`와 `X-Analysis-Context`에 각각 UUID를 보내고, `202` 응답의 `requestId`로 상태를 확인한다. 같은 제출의 재전송에는 기존 제출 키를 사용한다. [공개 API 명세](api/openapi.yaml)
 
-`local` 프로필의 가짜 분석은 일반 입력에 테스트 콘텐츠를 반환한다. 원문을 `[mock:failure]`, `[mock:guidance]`, `[mock:timeout]` 중 하나로 입력하면 각각 최종 실패, 같은 앱 문맥에서만 보이는 위기 안내, 작업 시간 초과를 확인할 수 있다. 시간 초과는 총 3회 시도하고, 위기 안내 조회는 가짜 분석 완료 후 15분 동안 허용한다.
+`local` 프로필은 `NIGHTVAULT_AI_URL`을 설정하면 Python 내부 API를 호출한다. URL이 비어 있으면 Spring 내부 가짜 분석기를 사용한다. Python 기본 모드인 `mock`과 Spring 내부 가짜 분석기는 `[mock:failure]`, `[mock:guidance]`, `[mock:timeout]` 입력을 지원한다. `solar` 모드에서는 Python이 루트 `.env`에서 키를 읽어 실제 Solar를 호출한다. [Python 실행 및 Solar 설정](../AI/AI_README.md#solar-연동-확인)
 
 ## 핵심 흐름
 
