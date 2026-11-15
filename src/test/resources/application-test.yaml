@@ -3,3 +3,9 @@
 
 # 테스트용 고정 데이터 키 (Base64 "test-only-nightvault-data-key-32", 32바이트). 운영·로컬 키로 쓰지 않는다.
 NIGHTVAULT_DATA_KEY: "dGVzdC1vbmx5LW5pZ2h0dmF1bHQtZGF0YS1rZXktMzI="
+
+# 시연 API 테스트용 설정. 꺼짐 동작은 DemoAccessTest가 직접 확인한다.
+nightvault:
+  demo:
+    enabled: true
+NIGHTVAULT_DEMO_KEY: "test-only-demo-key"

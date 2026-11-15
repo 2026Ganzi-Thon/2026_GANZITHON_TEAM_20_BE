@@ -20,3 +20,7 @@ server:
         http-only: true
         secure: true
         same-site: lax
+nightvault:
+  demo:
+    # 시연 패널(S-18) API. 켜더라도 환경변수 NIGHTVAULT_DEMO_KEY가 비어 있으면 모든 시연 API가 404다.
+    enabled: "${NIGHTVAULT_DEMO_ENABLED:false}"
