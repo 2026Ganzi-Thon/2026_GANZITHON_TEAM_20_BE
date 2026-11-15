@@ -106,10 +106,11 @@ class DemoService {
                    count(*) FILTER (WHERE w.publish_at <= :now) AS published,
                    min(w.publish_at) FILTER (WHERE w.publish_at > :now) AS next_publish_at,
                    (SELECT count(*) FROM analysis_requests r
-                    WHERE r.guest_id = :guest AND r.state = 'FAILED' AND r.expires_at > :now) AS failed
+                    WHERE r.guest_id = :guest AND r.state = 'FAILED' AND r.expires_at > :now
+                      AND r.accepted_at > :failedCutoff) AS failed
             FROM worries w
             WHERE w.guest_id = :guest AND w.deletion_started_at IS NULL AND w.expires_at > :now
-            """).param("guest", guest).param("now", now)
+            """).param("guest", guest).param("now", now).param("failedCutoff", now.minusHours(24))
             .query((row, index) -> new Status(true, row.getLong("locked"), row.getLong("published"),
                 row.getLong("failed"), row.getObject("next_publish_at", OffsetDateTime.class)))
             .single();
@@ -200,7 +201,7 @@ class DemoService {
 
     record TimeMachineResult(long shiftedSeconds, Status status) {}
 
-    /** {@code demo}는 항상 true. 프런트는 이 값으로 "시연 중" 표시를 띄운다. */
+    /** {@code demo}는 항상 true. 프런트는 이 값으로 "시연 중" 표시를 띄운다. 실패 수는 홈 실패 카드와 같이 접수 후 24시간 이내만 센다. */
     record Status(boolean demo, long lockedCount, long publicCount, long failedRequestCount,
                   OffsetDateTime nextPublishAt) {}
 }
