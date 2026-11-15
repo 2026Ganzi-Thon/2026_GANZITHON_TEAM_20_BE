@@ -43,6 +43,7 @@ class NotificationDispatch {
         this.guestWriteLock = guestWriteLock;
     }
 
+    // 시연 게스트(guests.kind='DEMO')는 대상 조회와 발송 직전 재확인 모두에서 제외한다(DEMO-02).
     @Scheduled(fixedDelay = 5000)
     void dispatch() {
         if (transport.publicKey() == null) {
@@ -51,7 +52,7 @@ class NotificationDispatch {
         var now = OffsetDateTime.now(clock);
         var due = jdbc.sql("""
             SELECT p.guest_id,p.endpoint
-            FROM push_subscriptions p JOIN guests g ON g.id=p.guest_id AND g.state='ACTIVE'
+            FROM push_subscriptions p JOIN guests g ON g.id=p.guest_id AND g.state='ACTIVE' AND g.kind='REGULAR'
             WHERE EXISTS (SELECT 1
             """ + ELIGIBLE_PUBLICATIONS + """
                )
@@ -162,7 +163,7 @@ class NotificationDispatch {
             """;
         long count = jdbc.sql("""
             SELECT count(*) FROM worries w
-            JOIN guests g ON g.id=w.guest_id AND g.state='ACTIVE'
+            JOIN guests g ON g.id=w.guest_id AND g.state='ACTIVE' AND g.kind='REGULAR'
             JOIN guest_settings s ON s.guest_id=w.guest_id
             JOIN push_subscriptions p ON p.guest_id=w.guest_id
             WHERE w.guest_id=:guest AND w.id IN (:ids) AND w.deletion_started_at IS NULL AND w.expires_at>:now

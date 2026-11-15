@@ -58,6 +58,8 @@ class GuestSecurityConfiguration {
             .authorizeHttpRequests(auth -> auth
                 .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                 .requestMatchers(guestEndpoints).permitAll()
+                // 시연 API는 인증 필터를 거친 뒤 컨트롤러가 키·시연 게스트를 확인하고, 실패를 모두 404로 숨긴다(DEMO-01).
+                .requestMatchers(paths.matcher("/api/v1/demo/**")).permitAll()
                 .anyRequest().authenticated())
             .csrf(csrf -> csrf.csrfTokenRepository(csrfTokens))
             .securityContext(context -> context.securityContextRepository(new NullSecurityContextRepository()))

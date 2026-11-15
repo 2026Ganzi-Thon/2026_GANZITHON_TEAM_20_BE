@@ -38,10 +38,34 @@ class GuestSessionService {
         if (existing.isPresent() || (existingToken != null && !restart)) {
             return existing;
         }
+        return Optional.of(issue("REGULAR"));
+    }
 
+    /**
+     * 시연 게스트 세션(DEMO-01). 현재 쿠키가 유효한 시연 게스트면 갱신하고, 아니면 새 시연 게스트를 발급한다.
+     * 일반 게스트 쿠키는 재사용하지 않으므로 브라우저의 쿠키가 시연 게스트로 바뀐다.
+     */
+    @Transactional
+    public SessionCookie startDemo(String existingToken) {
+        if (isToken(existingToken)) {
+            boolean demo = jdbc.sql("""
+                SELECT EXISTS (SELECT 1 FROM guest_sessions s JOIN guests g ON g.id = s.guest_id
+                               WHERE s.token_hash = :hash AND g.kind = 'DEMO')
+                """).param("hash", hash(existingToken)).query(Boolean.class).single();
+            if (demo) {
+                var existing = refresh(existingToken);
+                if (existing.isPresent()) {
+                    return existing.get();
+                }
+            }
+        }
+        return issue("DEMO");
+    }
+
+    private SessionCookie issue(String kind) {
         var now = OffsetDateTime.now(clock);
-        var guestId = jdbc.sql("INSERT INTO guests (created_at) VALUES (:now) RETURNING id")
-            .param("now", now).query(UUID.class).single();
+        var guestId = jdbc.sql("INSERT INTO guests (created_at, kind) VALUES (:now, :kind) RETURNING id")
+            .param("now", now).param("kind", kind).query(UUID.class).single();
         jdbc.sql("INSERT INTO guest_settings (guest_id) VALUES (:guestId)")
             .param("guestId", guestId).update();
 
@@ -60,7 +84,7 @@ class GuestSessionService {
             .param("expiresAt", expiresAt)
             .query((row, rowNumber) -> row.getObject("expires_at", OffsetDateTime.class).toInstant())
             .single();
-        return Optional.of(new SessionCookie(token, storedExpiry, true));
+        return new SessionCookie(token, storedExpiry, true);
     }
 
     Optional<SessionCookie> refresh(String token) {

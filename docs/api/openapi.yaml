@@ -13,6 +13,8 @@ tags:
 - name: Analysis
 - name: Vault
 - name: Activity
+- name: Demo
+  description: 시연 패널(S-18) 전용. 일반 내비게이션에 노출하지 않으며 시연 키 없이는 모든 경로가 404다. 사용법은 demo-guide.md를 따른다.
 security:
 - guestCookie: []
 paths:
@@ -1275,6 +1277,190 @@ paths:
                     message: 아직 공개되지 않았어요.
         '503':
           $ref: '#/components/responses/Unavailable'
+  /demo/session:
+    post:
+      tags: [Demo]
+      operationId: startDemoSession
+      summary: 시연 게스트 세션 발급 (DEMO-01)
+      description: |-
+        nightvault.demo.enabled=true이고 X-Demo-Key가 서버 환경변수 NIGHTVAULT_DEMO_KEY와 같을 때만 동작한다. 그 외에는 시연 기능의 존재를 숨기려고 404다.
+        현재 쿠키가 유효한 시연 게스트면 그 세션을 갱신하고, 쿠키가 없거나 일반 게스트면 새 시연 게스트를 발급해 쿠키를 교체한다. 일반 게스트 데이터는 바뀌지 않지만 브라우저는 시연 게스트로 바뀌므로 시크릿 창에서 사용한다.
+        새로 발급하면 CSRF 토큰을 다시 조회한다.
+      security:
+      - csrfToken: []
+      parameters:
+      - $ref: '#/components/parameters/DemoKey'
+      responses:
+        '200':
+          description: 시연 게스트 세션
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestSession'
+          headers:
+            Set-Cookie:
+              description: 발급 또는 갱신된 게스트 인증 쿠키
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/DemoHidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /demo/status:
+    get:
+      tags: [Demo]
+      operationId: getDemoStatus
+      summary: 시연 권한·상태 확인 (DEMO-01)
+      description: 시연 게스트이고 시연 키가 맞을 때만 200이다. 프런트는 200일 때만 시연 패널과 "시연 중" 표시를 보여준다. 개수는 삭제·만료되지 않은 시연 게스트 데이터 기준이다.
+      parameters:
+      - $ref: '#/components/parameters/DemoKey'
+      responses:
+        '200':
+          description: 시연 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoStatus'
+        '404':
+          $ref: '#/components/responses/DemoHidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /demo/time-machine:
+    post:
+      tags: [Demo]
+      operationId: demoTimeMachine
+      summary: 시연 기록 시간 이동 (DEMO-02)
+      description: |-
+        서버 시계는 그대로 두고 시연 게스트의 시각(작성·봉인·공개·열람·만료·활동·평가·회고 등)을 모두 같은 폭만큼 과거로 당긴다. 세션 만료 시각은 옮기지 않는다.
+        TO_PUBLISH는 worryId의 공개 시각까지, worryId가 없으면 가장 가까운 잠긴 걱정의 공개 시각까지 이동한다. PLUS_24H는 24시간 이동해 열람한 공개 기록을 회고 후보로 만든다.
+        일반 게스트 데이터와 실제 알림에는 영향이 없다. 시연 게스트는 Web Push 발송 대상에서 제외된다. 여러 번 이동하면 30일 보관 기간이 지나 만료될 수 있다.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      parameters:
+      - $ref: '#/components/parameters/DemoKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [preset]
+              properties:
+                preset:
+                  type: string
+                  enum: [TO_PUBLISH, PLUS_24H]
+                worryId:
+                  type: string
+                  format: uuid
+                  description: TO_PUBLISH에서만 사용. 생략하면 가장 가까운 잠긴 걱정
+            example:
+              preset: TO_PUBLISH
+      responses:
+        '200':
+          description: 이동한 폭과 이동 후 시연 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoTimeMachineResult'
+              examples:
+                toPublish:
+                  value:
+                    shiftedSeconds: 86400
+                    status:
+                      demo: true
+                      lockedCount: 0
+                      publicCount: 3
+                      failedRequestCount: 0
+                      nextPublishAt: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          description: 시연 권한 없음(DemoHidden과 같음) 또는 지정한 걱정이 시연 게스트의 유효한 걱정이 아님
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: 이동할 잠긴 걱정이 없거나 지정한 걱정이 이미 공개됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                NO_LOCKED_WORRY:
+                  value:
+                    code: NO_LOCKED_WORRY
+                    message: 공개를 기다리는 걱정이 없어요.
+                ALREADY_PUBLIC:
+                  value:
+                    code: ALREADY_PUBLIC
+                    message: 이미 공개된 걱정이에요.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /demo/presets:
+    post:
+      tags: [Demo]
+      operationId: createDemoPresets
+      summary: 시연 프리셋 생성 (DEMO-03)
+      description: |-
+        시연 게스트 데이터를 비운 뒤 잠김(내일 공개)·공개됨(1시간 전 공개, 미열람)·회고 대상(2일 전 공개, 열람함)·분석 실패(5분 전 접수) 예시를 만든다. 다시 호출해도 같은 구성으로 교체된다.
+        AI를 호출하지 않으며 모든 예시 문구는 "[시연 예시] "로 시작해 실제 AI 응답과 구분된다. 위기 안내 예시는 만들지 않으므로 전화 연결 화면이 자동으로 열리지 않는다.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      parameters:
+      - $ref: '#/components/parameters/DemoKey'
+      responses:
+        '200':
+          description: 생성 후 시연 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoStatus'
+              examples:
+                created:
+                  value:
+                    demo: true
+                    lockedCount: 1
+                    publicCount: 2
+                    failedRequestCount: 1
+                    nextPublishAt: '2026-11-16T09:00:00Z'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/DemoHidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /demo/reset:
+    post:
+      tags: [Demo]
+      operationId: resetDemo
+      summary: 시연 데이터 초기화 (DEMO-03)
+      description: 현재 시연 게스트의 분석 요청·걱정·활동·평가·회고·알림 예약만 지운다. 시연 게스트와 세션, 알림 설정은 남겨 바로 다시 시연할 수 있다. 일반 게스트 데이터는 지우지 않는다.
+      security:
+      - guestCookie: []
+        csrfToken: []
+      parameters:
+      - $ref: '#/components/parameters/DemoKey'
+      responses:
+        '200':
+          description: 초기화 후 시연 상태(모든 개수 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoStatus'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '404':
+          $ref: '#/components/responses/DemoHidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
 components:
   securitySchemes:
     guestCookie:
@@ -1288,6 +1474,13 @@ components:
       name: X-CSRF-TOKEN
       description: GET /csrf에서 받은 값. 인증 쿠키 기반 쓰기 요청에 필요.
   parameters:
+    DemoKey:
+      name: X-Demo-Key
+      in: header
+      required: true
+      description: 서버 환경변수 NIGHTVAULT_DEMO_KEY와 같은 값. 없거나 틀리면 404다. 코드·저장소에 넣지 않고 시연 담당자만 입력한다.
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1394,6 +1587,17 @@ components:
               value:
                 code: CSRF_REJECTED
                 message: 요청을 다시 확인해 주세요.
+    DemoHidden:
+      description: 시연이 꺼져 있거나, 시연 키가 없거나 틀리거나, 세션이 없거나 일반 게스트임. 시연 기능의 존재를 숨기려고 모두 같은 404다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            NOT_FOUND:
+              value:
+                code: NOT_FOUND
+                message: 확인할 수 없는 항목이에요.
     NotFound:
       description: 소유하지 않았거나 조회 가능한 대상이 없음
       content:
@@ -1970,3 +2174,36 @@ components:
               timeOver:
                 type: boolean
           - type: 'null'
+    DemoStatus:
+      type: object
+      additionalProperties: false
+      required: [demo, lockedCount, publicCount, failedRequestCount, nextPublishAt]
+      properties:
+        demo:
+          type: boolean
+          const: true
+          description: 프런트는 이 값으로 "시연 중" 표시를 띄운다.
+        lockedCount:
+          type: integer
+          minimum: 0
+        publicCount:
+          type: integer
+          minimum: 0
+        failedRequestCount:
+          type: integer
+          minimum: 0
+          description: 홈 실패 카드와 같이 접수 후 24시간 이내의 분석 실패 요청 수
+        nextPublishAt:
+          type: [string, 'null']
+          format: date-time
+    DemoTimeMachineResult:
+      type: object
+      additionalProperties: false
+      required: [shiftedSeconds, status]
+      properties:
+        shiftedSeconds:
+          type: integer
+          minimum: 1
+          description: 과거로 당긴 폭(초, 올림)
+        status:
+          $ref: '#/components/schemas/DemoStatus'
