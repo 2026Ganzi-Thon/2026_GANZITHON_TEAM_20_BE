@@ -127,9 +127,13 @@ export const restartGuest = () => api.post('/guest-sessions', { mode: 'RESTART' 
 | 400 | `INVALID_INPUT` | 요청 값 버그. 토스트 + 콘솔 로그 |
 | 401 | `GUEST_SESSION_REQUIRED` / `GUEST_SESSION_INVALID` | 3절 표 |
 | 403 | `CSRF_REJECTED` | 인터셉터가 1회 재시도. 그래도 실패하면 토스트 |
-| 404 | `NOT_FOUND` | "확인할 수 없는 항목" 안내 후 홈으로 (남의 것·삭제·만료 모두 404) |
+| 403 | `FORBIDDEN` | CSRF 외 접근 거부. 토스트 |
+| 404 | `NOT_FOUND` | "확인할 수 없는 항목" 안내 후 홈으로 (남의 것·삭제 중·만료 모두 404) |
 | 409 | `WORRY_LOCKED` | 아직 공개 전. 잠금 화면 |
 | 503 | `TEMPORARILY_UNAVAILABLE` | "잠시 후 다시" + 재시도 버튼 |
+
+- 오류 응답은 전역 예외 처리(`ApiExceptionHandler`)가 같은 형식으로 만든다. JSON 파싱 실패, 필수 쿼리·헤더 누락, 경로 UUID 형식 오류도 모두 400 `INVALID_INPUT`이고, DB 오류는 503 `TEMPORARILY_UNAVAILABLE`이다.
+- 오류 응답에는 `Cache-Control: no-store`가 붙는다.
 
 ### 활동 (BE2)
 
@@ -142,6 +146,8 @@ export const restartGuest = () => api.post('/guest-sessions', { mode: 'RESTART' 
 | 409 | `ACTIVITY_ALREADY_ENDED` | 이미 완료·중단된 활동을 조작 | 활동 재조회 → 결과/홈으로 |
 | 409 | `INVALID_ACTIVITY_STATE` | 유형·상태에 맞지 않는 조작(예: 액션에 pause) | 활동 재조회 후 화면 갱신 |
 | 409 | `ACTIVITY_NOT_COMPLETED` | 완료 전 평가 저장 | 평가 UI는 `state === 'COMPLETED'`일 때만 노출 |
+
+- 위 활동 코드는 `/api/v1/activities/...`와 `POST /worries/{worryId}/activities`(`Idempotency-Key` 없이 호출)에서 나온다. 6절 BE1 호환 경로는 이 코드들을 409 `ACTIVITY_CONFLICT` 하나로 묶어 돌려준다.
 
 ## 5. 활동 흐름
 
@@ -183,7 +189,66 @@ startCountdown(data.rest.remainingSeconds); // 일시정지 상태면 remainingS
 
 - 홈 이어하기 카드는 `getCurrent()`: 200이면 `progress`(ACTION은 `doneCount/totalSteps`, REST는 `remainingSeconds/timeOver`, EMPATHY는 `null`), 204면 카드 숨김.
 
-## 6. 배포 시 주의
+## 6. BE1 호환 경로 (새 화면에서 쓰지 않음)
+
+BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 돌려준다. 새 화면은 5절 경로만 쓴다.
+
+| 경로 | 비고 |
+|---|---|
+| `POST /worries/{worryId}/activities` + `Idempotency-Key` 헤더 | `replaceOpen`이 없으면 호환 응답(`checkedSteps`, `remainingMillis`, `feedback`)으로 200. `replaceActive`도 받는다. 같은 키에 다른 `helpType`이면 409 `IDEMPOTENCY_CONFLICT` |
+| `GET /worries/{worryId}/activities` | 걱정별 활동 이력(호환 응답 배열) |
+| `POST /worries/{worryId}/activities/{activityId}/commands` | `{ command: CHECK \| PAUSE \| RESUME \| STOP \| COMPLETE, step?, checked? }` |
+| `PUT /worries/{worryId}/activities/{activityId}/feedback` | `{ answer }` |
+
+- 호환 경로의 상태 오류는 모두 409 `ACTIVITY_CONFLICT`다.
+- **새 화면에서 활동 시작에 `Idempotency-Key`를 붙이지 않는다.** 붙이면 응답이 호환 모양으로 바뀐다.
+
+## 7. 금고·기록·회고·삭제
+
+응답 본문 상세는 [openapi.yaml](openapi.yaml)을 본다. 공통 오류(4절)는 생략했다.
+
+### 금고
+
+| 메서드·경로 | 응답 | 주요 오류 |
+|---|---|---|
+| `GET /vault/summary` | 200 `{ lockedCount, publicCount, nearestPublishAt, analysisRequests }` | |
+| `GET /worries?visibility=LOCKED\|PUBLIC&cursor&limit` | 200 `{ visibility, items, nextCursor }` | 400 `INVALID_INPUT`(`limit` 1~100 밖, 다른 목록의 커서) |
+| `GET /worries/{worryId}` | 200 잠금이면 `LockedDetail`, 공개면 `PublicDetail` | 404 `NOT_FOUND` |
+| `PATCH /worries/{worryId}/publication` `{ publishAt }` | 200 `LockedDetail` | 409 `ALREADY_PUBLIC`, 422 `INVALID_PUBLICATION`(지금 이전이거나 만료 이후) |
+| `POST /worries/{worryId}/view` | 200 `{ firstViewedAt }` | 409 `WORRY_LOCKED` |
+
+### 기록 (공개된 걱정)
+
+| 메서드·경로 | 응답 | 주요 오류 |
+|---|---|---|
+| `GET /records?cursor&limit` | 200 `{ items, nextCursor }` | 400 `INVALID_INPUT` |
+| `GET /records/{worryId}` | 200 `PublicDetail` | 404 `NOT_FOUND`(잠금 걱정 포함) |
+| `GET /worries/{worryId}/past-experience` | 200 `{ worryId, summary, helpType, helpful }`, 비슷한 경험 없으면 204 | 404 `NOT_FOUND` |
+| `PUT /worries/{worryId}/summary` `{ summary }` | 204 | 400 `INVALID_INPUT`(빈 값·500자 초과), 409 `WORRY_LOCKED` |
+| `PUT /worries/{worryId}/anxiety` `{ anxietyAfter: 1~5 }` | 204 | 400 `INVALID_INPUT`, 409 `WORRY_LOCKED` |
+
+### 회고
+
+`timeZone`은 IANA 이름(`Intl.DateTimeFormat().resolvedOptions().timeZone`)이다. 잘못된 값이면 400 `INVALID_INPUT`.
+
+| 메서드·경로 | 응답 | 주요 오류 |
+|---|---|---|
+| `GET /reflections/candidate?currentWorryId&timeZone` | 200 `{ worryId, firstAvailableAt }`, 후보 없으면 204 | |
+| `POST /reflections/skip-today?timeZone` | 204 (오늘 하루 후보 숨김) | |
+| `GET /reflections/{worryId}` | 200 `{ answer, respondedAt }`, 답 없으면 204 | 409 `WORRY_LOCKED` |
+| `PUT /reflections/{worryId}?currentWorryId&timeZone` `{ answer: BETTER \| ONGOING \| AS_FEARED }` | 204 (같은 답 재전송도 204) | 409 `REFLECTION_UNAVAILABLE`(지금 후보가 아님) |
+
+### 삭제
+
+| 메서드·경로 | 응답 | 주요 오류 |
+|---|---|---|
+| `DELETE /worries/{worryId}` | 204 삭제 완료, 202 `{ status: "DELETING" }` 처리 중 | 404 `NOT_FOUND` |
+| `DELETE /vault` | 204, 게스트 쿠키 삭제 | |
+
+- 202면 서버가 백그라운드에서 마저 지운다. 목록을 다시 조회하면 사라져 있다.
+- `DELETE /vault` 후에는 게스트 세션과 CSRF 토큰이 모두 없어진다. 3절 흐름(온보딩)으로 보내고, 다음 요청 전에 CSRF 토큰을 다시 받는다(`csrf = null`).
+
+## 8. 배포 시 주의
 
 - 이 가이드는 **프런트와 API가 같은 도메인**(리버스 프록시: `https://app.example.com/` → 프런트, `/api/` → 백엔드)인 전제다. 그래서 CORS 설정이 없고 쿠키가 `SameSite=Lax`다.
 - 운영 쿠키는 `Secure`라 **HTTPS**에서만 저장된다.
