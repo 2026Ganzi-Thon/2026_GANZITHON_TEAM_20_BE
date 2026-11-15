@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
 import javax.crypto.Cipher;
@@ -72,6 +73,16 @@ public class AnalysisPayloads {
 
     byte[] encryptContent(UUID requestId, AnalysisContent content) {
         return encrypt("content:" + requestId, json.writeValueAsBytes(content));
+    }
+
+    /** 시연 프리셋(DEMO-03) 예시 입력. 분석 워커가 저장하는 형식과 같다. */
+    public byte[] encryptSampleInput(UUID requestId, String text, int anxiety, String memo, Instant publishAt) {
+        return encryptInput(requestId, new WorryInput(text, anxiety, memo, publishAt));
+    }
+
+    /** 시연 프리셋(DEMO-03) 예시 분석 결과. AI를 호출하지 않고 고정 문구를 같은 형식으로 저장한다. */
+    public byte[] encryptSampleContent(UUID requestId, AnalysisContent content) {
+        return encryptContent(requestId, content);
     }
 
     public StoredInput readStoredInput(UUID requestId, byte[] encrypted) {

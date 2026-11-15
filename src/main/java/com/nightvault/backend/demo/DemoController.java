@@ -62,5 +62,21 @@ class DemoController {
             .body(demo.timeMachine(key, guestId, input.preset(), input.worryId()));
     }
 
+    @PostMapping("/presets")
+    ResponseEntity<DemoService.Status> presets(
+        @RequestHeader(name = DemoAccess.HEADER, required = false) String key,
+        @AuthenticationPrincipal UUID guestId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(demo.presets(key, guestId));
+    }
+
+    @PostMapping("/reset")
+    ResponseEntity<DemoService.Status> reset(
+        @RequestHeader(name = DemoAccess.HEADER, required = false) String key,
+        @AuthenticationPrincipal UUID guestId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(demo.reset(key, guestId));
+    }
+
     record TimeMachineRequest(DemoService.TimeMachinePreset preset, UUID worryId) {}
 }

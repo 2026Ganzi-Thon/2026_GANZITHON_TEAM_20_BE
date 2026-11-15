@@ -7,6 +7,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
+import com.nightvault.backend.analysis.AnalysisPayloads;
 import com.nightvault.backend.api.ApiError;
 import com.nightvault.backend.api.BusinessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -20,11 +21,77 @@ class DemoService {
     private final JdbcClient jdbc;
     private final DemoAccess access;
     private final Clock clock;
+    private final AnalysisPayloads payloads;
 
-    DemoService(JdbcClient jdbc, DemoAccess access, Clock clock) {
+    DemoService(JdbcClient jdbc, DemoAccess access, Clock clock, AnalysisPayloads payloads) {
         this.jdbc = jdbc;
         this.access = access;
         this.clock = clock;
+        this.payloads = payloads;
+    }
+
+    /**
+     * 프리셋(DEMO-03). 시연 데이터를 비운 뒤 잠김·공개됨·회고 대상·분석 실패 예시를 만든다.
+     * 다시 호출해도 같은 구성이 된다. AI는 호출하지 않는다.
+     */
+    @Transactional
+    public Status presets(String key, UUID guestId) {
+        UUID guest = access.lockDemoGuest(key, guestId);
+        clear(guest);
+        var now = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+        for (var sample : DemoSamples.WORRIES) {
+            var created = now.minus(sample.createdAgo());
+            var publish = now.plus(sample.publishFromNow());
+            var expires = created.plusDays(30);
+            UUID requestId = UUID.randomUUID();
+            jdbc.sql("""
+                INSERT INTO analysis_requests
+                    (id, guest_id, submission_key, state, accepted_at, expires_at, publish_at, next_attempt_at)
+                VALUES (:id, :guest, :key, 'SUCCEEDED', :created, :expires, :publish, :created)
+                """).param("id", requestId).param("guest", guest).param("key", UUID.randomUUID())
+                .param("created", created).param("expires", expires).param("publish", publish).update();
+            UUID worryId = jdbc.sql("""
+                INSERT INTO worries (guest_id, request_id, created_at, sealed_at, publish_at, first_viewed_at,
+                                     expires_at, input_ciphertext)
+                VALUES (:guest, :request, :created, :sealed, :publish, :viewed, :expires, :input)
+                RETURNING id
+                """).param("guest", guest).param("request", requestId).param("created", created)
+                .param("sealed", created.plusMinutes(1)).param("publish", publish)
+                .param("viewed", sample.firstViewedAgo() == null ? null : now.minus(sample.firstViewedAgo()))
+                .param("expires", expires)
+                .param("input", payloads.encryptSampleInput(requestId, sample.text(), sample.anxiety(), null,
+                    publish.toInstant()))
+                .query(UUID.class).single();
+            jdbc.sql("INSERT INTO ai_contents (worry_id, content_ciphertext) VALUES (:id, :content)")
+                .param("id", worryId).param("content", payloads.encryptSampleContent(requestId, sample.content()))
+                .update();
+        }
+        var failedAt = now.minus(DemoSamples.FAILED_ACCEPTED_AGO);
+        jdbc.sql("""
+            INSERT INTO analysis_requests (guest_id, submission_key, state, accepted_at, expires_at, next_attempt_at)
+            VALUES (:guest, :key, 'FAILED', :accepted, :expires, :accepted)
+            """).param("guest", guest).param("key", UUID.randomUUID()).param("accepted", failedAt)
+            .param("expires", failedAt.plusDays(30)).update();
+        return currentStatus(guest);
+    }
+
+    /** 초기화(DEMO-03). 시연 게스트의 기록 데이터만 지운다. 게스트·세션·알림 설정은 남긴다. */
+    @Transactional
+    public Status reset(String key, UUID guestId) {
+        UUID guest = access.lockDemoGuest(key, guestId);
+        clear(guest);
+        return currentStatus(guest);
+    }
+
+    private void clear(UUID guest) {
+        // 걱정·AI 콘텐츠·활동·평가·회고·알림 예약·공개 알림 이력은 요청/걱정 FK의 ON DELETE CASCADE로 함께 지워진다.
+        for (String sql : List.of(
+            "DELETE FROM analysis_requests WHERE guest_id = :guest",
+            "DELETE FROM reflection_skips WHERE guest_id = :guest",
+            "DELETE FROM worry_deletion_receipts WHERE guest_id = :guest"
+        )) {
+            jdbc.sql(sql).param("guest", guest).update();
+        }
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
