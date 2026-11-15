@@ -1,0 +1,239 @@
+package com.nightvault.backend.activity;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+import com.nightvault.backend.activity.ActivityRow.ActivityState;
+import com.nightvault.backend.activity.ActivityRow.HelpType;
+import com.nightvault.backend.worry.WorryActivityHistory;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+
+/** {@code activities} SQL. 잠금 순서(게스트 → 걱정 → 활동)는 호출하는 서비스가 지킨다. */
+@Repository
+class ActivityStore implements WorryActivityHistory {
+    private static final String COLUMNS = """
+        id, guest_id, worry_id, help_type, state, started_at, last_started_at, state_changed_at, ended_at,
+        step1_done, step2_done, step3_done, rest_duration_seconds, rest_ends_at, rest_remaining_seconds, version
+        """;
+
+    private final JdbcClient jdbc;
+    private final Clock clock;
+
+    ActivityStore(JdbcClient jdbc, Clock clock) {
+        this.jdbc = jdbc;
+        this.clock = clock;
+    }
+
+    /** 소유자 확인 겸 걱정 ID 조회. 잠금 없음. */
+    Optional<UUID> findWorryId(UUID guestId, UUID activityId) {
+        return jdbc.sql("SELECT worry_id FROM activities WHERE id = :id AND guest_id = :guestId")
+            .param("id", activityId).param("guestId", guestId)
+            .query(UUID.class).optional();
+    }
+
+    Optional<ActivityRow> find(UUID guestId, UUID activityId) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM activities WHERE id = :id AND guest_id = :guestId")
+            .param("id", activityId).param("guestId", guestId)
+            .query(ActivityStore::map).optional();
+    }
+
+    Optional<ActivityRow> lock(UUID guestId, UUID activityId) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM activities WHERE id = :id AND guest_id = :guestId FOR UPDATE")
+            .param("id", activityId).param("guestId", guestId)
+            .query(ActivityStore::map).optional();
+    }
+
+    /** HOME-03: 게스트의 열린 활동 중 상태가 가장 최근에 바뀐 것. 볼 수 없는 걱정의 활동은 뺀다. */
+    Optional<ActivityRow> findCurrent(UUID guestId, Instant now) {
+        return jdbc.sql("""
+                SELECT a.id, a.guest_id, a.worry_id, a.help_type, a.state, a.started_at, a.last_started_at,
+                       a.state_changed_at, a.ended_at, a.step1_done, a.step2_done, a.step3_done,
+                       a.rest_duration_seconds, a.rest_ends_at, a.rest_remaining_seconds, a.version
+                FROM activities a
+                JOIN worries w ON w.id = a.worry_id AND w.guest_id = a.guest_id
+                JOIN guests g ON g.id = a.guest_id AND g.state = 'ACTIVE'
+                WHERE a.guest_id = :guestId
+                  AND a.state IN ('IN_PROGRESS', 'PAUSED')
+                  AND %s
+                ORDER BY a.state_changed_at DESC, a.id DESC
+                LIMIT 1
+                """.formatted(ActivityWorryAccess.VISIBLE_WORRY))
+            .param("guestId", guestId)
+            .param("now", utc(now))
+            .query(ActivityStore::map).optional();
+    }
+
+    /** 같은 걱정의 열린(진행 중·일시정지) 활동. 부분 유일 인덱스로 최대 하나다. */
+    Optional<ActivityRow> lockOpen(UUID worryId) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+                FROM activities WHERE worry_id = :worryId AND state IN ('IN_PROGRESS', 'PAUSED')
+                FOR UPDATE
+                """)
+            .param("worryId", worryId)
+            .query(ActivityStore::map).optional();
+    }
+
+    /** 같은 걱정의 중단된 액션. 부분 유일 인덱스로 최대 하나다. */
+    Optional<ActivityRow> lockStoppedAction(UUID worryId) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+                FROM activities WHERE worry_id = :worryId AND help_type = 'ACTION' AND state = 'STOPPED' AND resumable
+                FOR UPDATE
+                """)
+            .param("worryId", worryId)
+            .query(ActivityStore::map).optional();
+    }
+
+    List<ActivityRow> history(UUID guestId, UUID worryId) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+            FROM activities WHERE worry_id = :worryId AND guest_id = :guestId
+            ORDER BY last_started_at DESC, id DESC
+            """).param("worryId", worryId).param("guestId", guestId).query(ActivityStore::map).list();
+    }
+
+    Optional<ActivityRow> findStart(UUID guestId, UUID worryId, UUID key) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+            FROM activities WHERE guest_id = :guestId AND worry_id = :worryId AND id = (
+                SELECT activity_id FROM activity_start_keys WHERE worry_id = :worryId AND start_key = :key
+            )
+            """).param("guestId", guestId).param("worryId", worryId).param("key", key)
+            .query(ActivityStore::map).optional();
+    }
+
+    void rememberStart(UUID worryId, UUID key, UUID activityId) {
+        jdbc.sql("INSERT INTO activity_start_keys (worry_id, start_key, activity_id) VALUES (:worry, :key, :activity)")
+            .param("worry", worryId).param("key", key).param("activity", activityId).update();
+    }
+
+    @Override
+    public Map<UUID, Latest> latestFor(UUID guestId, List<UUID> worryIds) {
+        if (worryIds.isEmpty()) {
+            return Map.of();
+        }
+        return jdbc.sql("""
+            SELECT DISTINCT ON (a.worry_id) a.worry_id, a.help_type, f.answer
+            FROM activities a
+            JOIN worries w ON w.id = a.worry_id AND w.guest_id = a.guest_id
+            JOIN guests g ON g.id = a.guest_id AND g.state = 'ACTIVE'
+            LEFT JOIN activity_feedback f ON f.activity_id = a.id
+            WHERE a.guest_id = :guestId AND w.id IN (:ids) AND %s
+            ORDER BY a.worry_id, a.last_started_at DESC, a.id DESC
+            """.formatted(ActivityWorryAccess.VISIBLE_WORRY))
+            .param("guestId", guestId).param("ids", worryIds).param("now", utc(clock.instant()))
+            .query((row, index) -> Map.entry(row.getObject("worry_id", UUID.class),
+                new Latest(com.nightvault.backend.worry.HelpType.valueOf(row.getString("help_type")),
+                    "HELPFUL".equals(row.getString("answer")))))
+            .list().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    /**
+     * 새 활동을 {@code IN_PROGRESS}로 만든다. 동시에 다른 요청이 같은 걱정에 열린 활동을 만들었으면
+     * 유일 인덱스 충돌을 {@code DO NOTHING}으로 넘기고 빈 값을 돌려준다(호출자가 다시 읽는다).
+     */
+    Optional<ActivityRow> insert(UUID guestId, UUID worryId, HelpType helpType, Instant now, Integer restDurationSeconds) {
+        boolean action = helpType == HelpType.ACTION;
+        boolean rest = helpType == HelpType.REST;
+        return jdbc.sql("""
+                INSERT INTO activities (guest_id, worry_id, help_type, state, started_at, last_started_at, state_changed_at,
+                                        step1_done, step2_done, step3_done, rest_duration_seconds, rest_ends_at)
+                VALUES (:guestId, :worryId, :helpType, 'IN_PROGRESS', :now, :now, :now,
+                        :step, :step, :step, :restDuration, :restEndsAt)
+                ON CONFLICT DO NOTHING
+                RETURNING
+                """ + COLUMNS)
+            .param("guestId", guestId)
+            .param("worryId", worryId)
+            .param("helpType", helpType.name())
+            .param("now", utc(now))
+            .param("step", action ? Boolean.FALSE : null, Types.BOOLEAN)
+            .param("restDuration", rest ? restDurationSeconds : null, Types.INTEGER)
+            .param("restEndsAt", rest ? utc(now.plusSeconds(restDurationSeconds)) : null, Types.TIMESTAMP_WITH_TIMEZONE)
+            .query(ActivityStore::map).optional();
+    }
+
+    void update(ActivityRow row) {
+        jdbc.sql("""
+                UPDATE activities
+                SET state = :state, last_started_at = :lastStartedAt, state_changed_at = :stateChangedAt,
+                    ended_at = :endedAt, step1_done = :step1, step2_done = :step2, step3_done = :step3,
+                    rest_ends_at = :restEndsAt, rest_remaining_seconds = :restRemaining, version = :version
+                WHERE id = :id
+                """)
+            .param("id", row.id())
+            .param("state", row.state().name())
+            .param("lastStartedAt", utc(row.lastStartedAt()))
+            .param("stateChangedAt", utc(row.stateChangedAt()))
+            .param("endedAt", utc(row.endedAt()), Types.TIMESTAMP_WITH_TIMEZONE)
+            .param("step1", row.step1Done(), Types.BOOLEAN)
+            .param("step2", row.step2Done(), Types.BOOLEAN)
+            .param("step3", row.step3Done(), Types.BOOLEAN)
+            .param("restEndsAt", utc(row.restEndsAt()), Types.TIMESTAMP_WITH_TIMEZONE)
+            .param("restRemaining", row.restRemainingSeconds(), Types.INTEGER)
+            .param("version", row.version())
+            .update();
+    }
+
+    Optional<ActivityFeedback> findFeedback(UUID activityId) {
+        return jdbc.sql("SELECT answer, answered_at, updated_at FROM activity_feedback WHERE activity_id = :id")
+            .param("id", activityId)
+            .query(ActivityStore::mapFeedback).optional();
+    }
+
+    /** 평가 저장. 처음이면 만들고, 이미 있으면 답과 {@code updated_at}만 바꾼다({@code answered_at} 유지). */
+    ActivityFeedback saveFeedback(UUID activityId, ActivityFeedback.Answer answer, Instant now) {
+        return jdbc.sql("""
+                INSERT INTO activity_feedback (activity_id, answer, answered_at, updated_at)
+                VALUES (:id, :answer, :now, :now)
+                ON CONFLICT (activity_id) DO UPDATE SET answer = EXCLUDED.answer, updated_at = EXCLUDED.updated_at
+                RETURNING answer, answered_at, updated_at
+                """)
+            .param("id", activityId)
+            .param("answer", answer.name())
+            .param("now", utc(now))
+            .query(ActivityStore::mapFeedback).single();
+    }
+
+    private static ActivityFeedback mapFeedback(ResultSet row, int rowNumber) throws SQLException {
+        return new ActivityFeedback(ActivityFeedback.Answer.valueOf(row.getString("answer")),
+            instant(row, "answered_at"), instant(row, "updated_at"));
+    }
+
+    private static ActivityRow map(ResultSet row, int rowNumber) throws SQLException {
+        return new ActivityRow(
+            row.getObject("id", UUID.class),
+            row.getObject("guest_id", UUID.class),
+            row.getObject("worry_id", UUID.class),
+            HelpType.valueOf(row.getString("help_type")),
+            ActivityState.valueOf(row.getString("state")),
+            instant(row, "started_at"),
+            instant(row, "last_started_at"),
+            instant(row, "state_changed_at"),
+            instant(row, "ended_at"),
+            row.getObject("step1_done", Boolean.class),
+            row.getObject("step2_done", Boolean.class),
+            row.getObject("step3_done", Boolean.class),
+            row.getObject("rest_duration_seconds", Integer.class),
+            instant(row, "rest_ends_at"),
+            row.getObject("rest_remaining_seconds", Integer.class),
+            row.getInt("version"));
+    }
+
+    private static Instant instant(ResultSet row, String column) throws SQLException {
+        OffsetDateTime value = row.getObject(column, OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
+    }
+
+    private static OffsetDateTime utc(Instant instant) {
+        return instant == null ? null : instant.atOffset(ZoneOffset.UTC);
+    }
+}
