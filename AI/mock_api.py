@@ -1,8 +1,9 @@
 import asyncio
+import logging
 import re
 from contextlib import asynccontextmanager
 from hmac import compare_digest
-from typing import Annotated
+from typing import Annotated, Callable
 from uuid import UUID
 
 import httpx
@@ -11,25 +12,42 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from crisis import CrisisDecision, assess_crisis
 from solar import AnalysisSettings, SolarAnalyzer, SolarFailure
 
 
+logger = logging.getLogger(__name__)
 NON_WHITESPACE = re.compile(
     r"[^\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]"
 )
 SURROGATE = re.compile(r"[\uD800-\uDFFF]")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = AnalysisSettings()
     app.state.service_token = settings.service_token
     app.state.solar = None
+    app.state.crisis_assessor = assess_crisis
     if settings.mode == "mock":
         yield
         return
     async with httpx.AsyncClient(timeout=settings.timeout) as http:
         app.state.solar = SolarAnalyzer(http, settings.api_key, settings.model, settings.timeout)
         yield
+
+
+def assess_before_generation(
+    assessor: Callable[[str], CrisisDecision] | None, text: str
+) -> CrisisDecision:
+    if assessor is None:
+        return CrisisDecision.FAILED
+    try:
+        return assessor(text)
+    except Exception as error:
+        # Assessment errors may include user input or a provider response.
+        logger.warning("Crisis assessment failed (%s)", type(error).__name__)
+        return CrisisDecision.FAILED
 
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -87,6 +105,11 @@ async def analyze(
     ids = {"requestId": body.requestId, "attemptId": body.attemptId}
     solar = request.app.state.solar
     if solar is not None:
+        decision = assess_before_generation(request.app.state.crisis_assessor, body.text)
+        if decision is CrisisDecision.GUIDANCE:
+            return {**ids, "outcome": "SUPPORT_GUIDANCE", "guidanceCode": "S16"}
+        if decision is not CrisisDecision.GENERATE:
+            return {**ids, "outcome": "FAILURE", "failureCode": "ASSESSMENT_FAILED"}
         try:
             content = await solar.analyze(body.text)
         except SolarFailure as error:
