@@ -222,8 +222,8 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 | 메서드·경로 | 응답 | 주요 오류 |
 |---|---|---|
 | `GET /records?cursor&limit` | 200 `{ items, nextCursor }`, 항목에 `summaryEdited` 포함 | 400 `INVALID_INPUT` |
-| `GET /records/{worryId}` | 200 `PublicDetail` | 404 `NOT_FOUND`(잠금 걱정 포함) |
-| `GET /worries/{worryId}/past-experience` | 200 `{ worryId, summary, helpType, helpful }`, 비슷한 경험 없으면 204. 활동을 고르지 않은 기록이면 `helpType: null`. `helpful: true`면 `helpType`은 도움 된 활동의 유형 | 404 `NOT_FOUND` |
+| `GET /records/{worryId}` | 200 `PublicDetail`. 활동 이력·평가는 `GET /worries/{worryId}/activities`, 회고는 `GET /reflections/{worryId}`로 따로 조회 | 404 `NOT_FOUND`(잠금 걱정 포함) |
+| `GET /worries/{worryId}/past-experience` | 200 `{ worryId, summary, helpType, helpful }`, 비슷한 경험 없으면 204. 활동을 고르지 않은 기록이면 `helpType: null`. `helpful: true`면 `helpType`은 도움 된 활동의 유형 | 404 `NOT_FOUND`(현재 걱정이 잠김이어도 404) |
 | `PUT /worries/{worryId}/summary` `{ summary }` | 204 | 400 `INVALID_INPUT`(빈 값·500자 초과), 409 `WORRY_LOCKED` |
 | `PUT /worries/{worryId}/anxiety` `{ anxietyAfter: 1~5 }` | 204 | 400 `INVALID_INPUT`, 409 `WORRY_LOCKED` |
 
@@ -233,8 +233,8 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 
 | 메서드·경로 | 응답 | 주요 오류 |
 |---|---|---|
-| `GET /reflections/candidate?currentWorryId&timeZone` | 200 `{ worryId, firstAvailableAt }`, 후보 없으면 204 | |
-| `POST /reflections/skip-today?timeZone` | 204 (오늘 하루 후보 숨김) | |
+| `GET /reflections/candidate?currentWorryId&timeZone` | 200 `{ worryId, firstAvailableAt, summary, summaryEdited }`(요약은 수정본 우선), 후보 없으면 204 | |
+| `POST /reflections/skip-today?timeZone` | 204 (오늘 하루 후보 숨김). 같은 날 판단은 후보 조회 때 보낸 `timeZone` 기준 | |
 | `GET /reflections/{worryId}` | 200 `{ answer, respondedAt }`, 답 없으면 204 | 409 `WORRY_LOCKED` |
 | `PUT /reflections/{worryId}?currentWorryId&timeZone` `{ answer: BETTER \| ONGOING \| AS_FEARED }` | 204 (같은 답 재전송도 204) | 409 `REFLECTION_UNAVAILABLE`(지금 후보가 아님), 409 `REFLECTION_ALREADY_ANSWERED`(이미 다른 답) |
 

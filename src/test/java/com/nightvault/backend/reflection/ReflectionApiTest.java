@@ -65,6 +65,26 @@ class ReflectionApiTest extends ApiTestSupport {
     }
 
     @Test
+    void 후보_응답에_수정본_우선_요약과_수정_여부를_준다() {
+        TestGuest guest = fixtures.guest();
+        Client client = client(guest);
+        TestWorry current = fixtures.publicWorry(guest);
+        TestWorry target = viewed(guest, Duration.ofDays(2));
+
+        Response before = candidate(client, current);
+        assertThat(before.body().get("summary").asString()).isEqualTo("테스트용 요약입니다.");
+        assertThat(before.body().get("summaryEdited").asBoolean()).isFalse();
+
+        client.put("/api/v1/worries/" + target.id() + "/summary", "{\"summary\":\"면접 연락이 늦을까 걱정했다\"}");
+
+        Response after = candidate(client, current);
+        assertThat(after.body().get("worryId").asString()).isEqualTo(target.id().toString());
+        assertThat(after.body().get("summary").asString()).isEqualTo("면접 연락이 늦을까 걱정했다");
+        assertThat(after.body().get("summaryEdited").asBoolean()).isTrue();
+        assertThat(after.body().has("firstAvailableAt")).isTrue();
+    }
+
+    @Test
     void 잘못된_시간대는_400이다() {
         TestGuest guest = fixtures.guest();
         Client client = client(guest);

@@ -8,6 +8,7 @@ import java.util.UUID;
 import com.nightvault.backend.api.ApiError;
 import com.nightvault.backend.api.BusinessException;
 import com.nightvault.backend.worry.WorryAccess;
+import com.nightvault.backend.worry.WorrySummaries;
 import com.nightvault.backend.guest.GuestWriteLock;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -20,12 +21,25 @@ class Reflections {
     private final GuestWriteLock guestWriteLock;
     private final WorryAccess access;
     private final Clock clock;
+    private final WorrySummaries summaries;
 
-    Reflections(JdbcClient jdbc, WorryAccess access, Clock clock, GuestWriteLock guestWriteLock) {
+    Reflections(JdbcClient jdbc, WorryAccess access, Clock clock, GuestWriteLock guestWriteLock, WorrySummaries summaries) {
         this.jdbc = jdbc;
+        this.summaries = summaries;
         this.guestWriteLock = guestWriteLock;
         this.access = access;
         this.clock = clock;
+    }
+
+    /** 회고 카드 (REVIEW-01). 후보의 요약은 수정본을 우선한다. 후보가 없으면 null이다. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public CandidateCard card(UUID guestId, UUID currentId, ZoneId zone) {
+        var candidate = candidate(guestId, currentId, zone);
+        if (candidate == null) {
+            return null;
+        }
+        var summary = summaries.find(guestId, candidate.worryId());
+        return new CandidateCard(candidate.worryId(), candidate.firstAvailableAt(), summary.summary(), summary.edited());
     }
 
     Candidate candidate(UUID guestId, UUID currentId, ZoneId zone) {
@@ -90,5 +104,6 @@ class Reflections {
 
     enum Answer { BETTER, ONGOING, AS_FEARED }
     record Candidate(UUID worryId, OffsetDateTime firstAvailableAt) {}
+    record CandidateCard(UUID worryId, OffsetDateTime firstAvailableAt, String summary, boolean summaryEdited) {}
     record Response(Answer answer, OffsetDateTime respondedAt) {}
 }
