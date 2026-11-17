@@ -47,8 +47,8 @@ class VaultService {
         }
         var content = decrypt(row);
         return new PublicDetail(meta.worryId(), Visibility.PUBLIC, meta.createdAt(), meta.publishAt(),
-            content.summary(), content.input().anxiety(), meta.firstViewedAt(), content.input().text(),
-            content.input().memo(), content.anxietyAfter(), content.analysis());
+            content.summary(), content.summaryEdited(), content.input().anxiety(), meta.firstViewedAt(),
+            content.input().text(), content.input().memo(), content.anxietyAfter(), AnalysisView.of(content.analysis()));
     }
 
     @Transactional
@@ -132,7 +132,7 @@ class VaultService {
                 ? analysis.summary() : payloads.decryptEditedSummary(worryId, encrypted.editedSummary());
             Integer anxiety = encrypted.anxietyAfter() == null
                 ? null : payloads.decryptAnxietyAfter(worryId, encrypted.anxietyAfter());
-            return new DecryptedContent(input, analysis, summary, anxiety);
+            return new DecryptedContent(input, analysis, summary, encrypted.summaryEdited(), anxiety);
         } catch (IllegalStateException | IllegalArgumentException | JacksonException exception) {
             throw new BusinessException(ApiError.TEMPORARILY_UNAVAILABLE);
         }
@@ -173,10 +173,19 @@ class VaultService {
         implements WorryResponse {}
     record PublicItem(UUID worryId, Visibility visibility, Instant createdAt, Instant publishAt,
                       String summary, int anxietyBefore, Instant firstViewedAt) implements WorryResponse {}
+    /** summary는 수정본 우선이며 summaryEdited가 true면 화면 출처를 '내가 정리했어요'로 표시한다(M-04). */
     record PublicDetail(UUID worryId, Visibility visibility, Instant createdAt, Instant publishAt,
-                        String summary, int anxietyBefore, Instant firstViewedAt, String text, String memo,
-                        Integer anxietyAfter, AnalysisContent analysis) implements WorryResponse {}
+                        String summary, boolean summaryEdited, int anxietyBefore, Instant firstViewedAt,
+                        String text, String memo, Integer anxietyAfter, AnalysisView analysis) implements WorryResponse {}
+    /** AI 결과 중 화면에 보이는 부분. AI 원본 요약은 서버에만 보관하고 응답에 넣지 않는다(M-04). */
+    record AnalysisView(AnalysisContent.Recommendation recommendation, List<String> actionSteps,
+                        String restGuide, String empathyMessage) {
+        static AnalysisView of(AnalysisContent content) {
+            return new AnalysisView(content.recommendation(), content.actionSteps(), content.restGuide(),
+                content.empathyMessage());
+        }
+    }
     record ViewResult(Instant firstViewedAt) {}
     record DecryptedContent(AnalysisPayloads.StoredInput input, AnalysisContent analysis,
-                                    String summary, Integer anxietyAfter) {}
+                            String summary, boolean summaryEdited, Integer anxietyAfter) {}
 }

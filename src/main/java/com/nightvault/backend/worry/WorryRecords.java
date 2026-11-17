@@ -48,7 +48,7 @@ class WorryRecords {
             int before = data.input().anxiety();
             Integer after = data.anxietyAfter();
             var latest = history.get(meta.worryId());
-            return new RecordItem(meta.worryId(), meta.createdAt(), data.summary(), before, after,
+            return new RecordItem(meta.worryId(), meta.createdAt(), data.summary(), data.summaryEdited(), before, after,
                 after == null ? null : after - before, latest == null ? null : latest.type());
         }).toList();
         return new RecordPage(items, rows.size() > limit ? VaultService.encodeCursor(VaultService.Visibility.PUBLIC, page.getLast().metadata()) : null);
@@ -100,7 +100,7 @@ class WorryRecords {
             .map(match -> match.group()).collect(Collectors.toSet());
     }
 
-    record RecordItem(UUID worryId, Instant createdAt, String summary, int anxietyBefore, Integer anxietyAfter,
+    record RecordItem(UUID worryId, Instant createdAt, String summary, boolean summaryEdited, int anxietyBefore, Integer anxietyAfter,
                       Integer anxietyDelta, HelpType latestHelpType) {}
     record RecordPage(List<RecordItem> items, String nextCursor) {}
     record PastExperience(UUID worryId, String summary, HelpType helpType, boolean helpful) {}

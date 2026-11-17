@@ -522,13 +522,13 @@ paths:
                     createdAt: '2026-11-11T14:00:00Z'
                     publishAt: '2026-11-11T23:00:00Z'
                     summary: 내일 발표를 앞두고 내용을 잊을까 걱정하고 있다.
+                    summaryEdited: false
                     anxietyBefore: 3
                     firstViewedAt: null
                     text: 내일 발표 때 첫 문장을 잊어버릴까 걱정돼.
                     memo: 발표 첫 문장 확인
                     anxietyAfter: null
                     analysis:
-                      summary: 내일 발표를 앞두고 내용을 잊을까 걱정하고 있다.
                       recommendation:
                         type: ACTION
                         reason: 발표의 시작 부분을 짧게 연습하면 준비할 행동을 한 가지 정할 수 있어요.
@@ -1841,6 +1841,20 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+    PublicAnalysis:
+      type: object
+      additionalProperties: false
+      description: 화면에 보이는 AI 결과. AI 원본 요약은 서버에만 보관하고 응답에 넣지 않는다(M-04). 표시용 요약은 상위 summary를 쓴다.
+      required: [recommendation, actionSteps, restGuide, empathyMessage]
+      properties:
+        recommendation:
+          $ref: '#/components/schemas/GeneratedContent/properties/recommendation'
+        actionSteps:
+          $ref: '#/components/schemas/GeneratedContent/properties/actionSteps'
+        restGuide:
+          $ref: '#/components/schemas/GeneratedContent/properties/restGuide'
+        empathyMessage:
+          $ref: '#/components/schemas/GeneratedContent/properties/empathyMessage'
     LockedWorry:
       type: object
       additionalProperties: false
@@ -1888,8 +1902,8 @@ components:
     PublicWorry:
       type: object
       additionalProperties: false
-      required: [worryId, visibility, createdAt, publishAt, summary, anxietyBefore, firstViewedAt, text, memo, anxietyAfter,
-        analysis]
+      required: [worryId, visibility, createdAt, publishAt, summary, summaryEdited, anxietyBefore, firstViewedAt, text, memo,
+        anxietyAfter, analysis]
       properties:
         worryId:
           type: string
@@ -1906,6 +1920,10 @@ components:
         summary:
           type: string
           minLength: 1
+          description: 사용자가 수정한 요약이 있으면 수정본, 없으면 AI 요약
+        summaryEdited:
+          type: boolean
+          description: 사용자가 요약을 수정했으면 true. 화면 출처를 '내가 정리했어요'로 표시한다(M-04).
         anxietyBefore:
           $ref: '#/components/schemas/Anxiety'
         firstViewedAt:
@@ -1924,7 +1942,7 @@ components:
           - $ref: '#/components/schemas/Anxiety'
           - type: 'null'
         analysis:
-          $ref: '#/components/schemas/GeneratedContent'
+          $ref: '#/components/schemas/PublicAnalysis'
     WorryDetail:
       oneOf:
       - $ref: '#/components/schemas/LockedWorry'

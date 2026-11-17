@@ -1,5 +1,7 @@
 package com.nightvault.backend.worry;
 
+import java.time.Clock;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import com.nightvault.backend.analysis.AnalysisPayloads;
@@ -14,11 +16,13 @@ public class WorryEdits {
     private final JdbcClient jdbc;
     private final WorryAccess access;
     private final AnalysisPayloads payloads;
+    private final Clock clock;
 
-    WorryEdits(JdbcClient jdbc, WorryAccess access, AnalysisPayloads payloads) {
+    WorryEdits(JdbcClient jdbc, WorryAccess access, AnalysisPayloads payloads, Clock clock) {
         this.jdbc = jdbc;
         this.access = access;
         this.payloads = payloads;
+        this.clock = clock;
     }
 
     @Transactional
@@ -29,8 +33,10 @@ public class WorryEdits {
             throw new BusinessException(ApiError.INVALID_INPUT);
         }
         access.lockPublic(guestId, worryId);
-        jdbc.sql("UPDATE worries SET edited_summary_ciphertext = :ciphertext WHERE id = :id")
+        // AI 원본(ai_contents)은 그대로 두고 수정본과 수정 시각만 덮어쓴다. 되돌리기는 없다.
+        jdbc.sql("UPDATE worries SET edited_summary_ciphertext = :ciphertext, summary_edited_at = :now WHERE id = :id")
             .param("ciphertext", payloads.encryptEditedSummary(worryId, summary))
+            .param("now", OffsetDateTime.now(clock))
             .param("id", worryId).update();
     }
 
