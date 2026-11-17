@@ -22,7 +22,7 @@ python -m venv .\AI\.venv
 
 Spring의 루트 `.env`에 `NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/analyze`를 추가하고 `local` 프로필로 Spring을 시작한다. 선택적으로 내부 Bearer 인증을 테스트하려면 Python을 시작하는 PowerShell과 Spring의 `.env`에 동일한 `NIGHTVAULT_AI_TOKEN`을 설정한다.
 
-일반 입력은 고정된 성공 콘텐츠를 반환한다. `[mock:guidance]`는 S-16 도움 안내, `[mock:failure]`는 최종 실패, `[mock:timeout]`은 Spring의 로컬 작업 제한 시간 3초를 넘기는 응답을 만든다. 연결 실패와 시간 초과는 기존 작업 큐에서 최초 시도를 포함해 최대 3번 처리한다. 이 서버는 합성 입력으로 내부 HTTP 계약을 확인하는 용도다.
+일반 입력은 고정된 성공 콘텐츠를 반환한다. `[mock:guidance]`는 S-16 도움 안내, `[mock:failure]`는 최종 실패를 만든다. Python 모의 API의 `[mock:timeout]`은 4초 대기하므로 이 경로의 시간 초과를 검증할 때 Spring에 `NIGHTVAULT_AI_TIMEOUT_SECONDS=3`을 설정한다. 연결 실패와 시간 초과는 기존 작업 큐에서 최초 시도를 포함해 최대 3번 처리한다. 이 서버는 합성 입력으로 내부 HTTP 계약을 확인하는 용도다.
 
 ## Solar 연동 확인
 
@@ -32,12 +32,13 @@ Spring의 루트 `.env`에 `NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/
 NIGHTVAULT_AI_MODE=solar
 NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/analyze
 UPSTAGE_MODEL=solar-mini4
-UPSTAGE_TIMEOUT_SECONDS=10
-NIGHTVAULT_AI_TIMEOUT_SECONDS=12
+UPSTAGE_TIMEOUT_SECONDS=24
+NIGHTVAULT_AI_TIMEOUT_SECONDS=27
 ```
 
-- 합성 걱정을 Spring의 제출 API에 보내고 `requestId`로 조회해 `SUCCEEDED`를 확인한다. Python에서 명확한 신호는 로컬 규칙으로 S-16에 연결한다. 규칙으로 결론을 내리기 어려우면 원문으로 분류만 요청하고, 일반 걱정으로 분류된 경우에 요약·추천·액션·휴식·공감 생성을 호출한다. 분류를 포함한 Python 분석 요청 전체에 모델 호출 제한을 적용한다. [위기 안내 분기 근거와 검증 범위](../docs/spec/crisis-routing-evidence.md)
+- 합성 걱정을 Spring의 제출 API에 보내고 `requestId`로 조회해 `SUCCEEDED`를 확인한다. Python에서 규칙이 확인한 명확한 신호는 S-16으로 연결한다. 후보 표현이나 모호한 문맥은 Solar에 원문으로 `GUIDANCE` 또는 `GENERATE` 판정만 요청한다. 모델이 현재 위험을 배제하기 어려우면 안내로 연결하고, 일반 걱정으로 분류되면 요약·추천·액션·휴식·공감을 생성한다. 분류 호출 실패나 잘못된 응답은 `ASSESSMENT_FAILED`로 처리한다. 분류를 포함한 Python 분석 요청 전체에 모델 호출 제한을 적용한다. [위기 안내 분기 근거와 검증 범위](../docs/spec/crisis-routing-evidence.md)
 - Spring 작업 제한은 Python의 모델 호출 제한보다 길게 설정한다. PostgreSQL 선점 기한은 Spring 작업 제한에 저장 여유 5초를 더한다. 시간 초과·호출 한도·일시 장애는 Spring이 최대 3회 시도하고, 형식 오류와 자격 증명 오류는 최종 실패로 처리한다.
+- 기본 전체 제한은 Python 24초와 Spring 27초다. 첫 문맥 분류는 최대 3초, 첫 일반 생성은 최대 5초를 사용하고, 지연될 때 같은 단계에 한해 한 번 재시도한다. 짧은 제한을 명시하면 첫 시도도 그에 비례해 줄어든다. Python 요청 전체의 24초 한도 안에서만 분류·생성·재시도를 수행한다. `.env`에 기존 10초·12초가 있으면 새 값으로 맞추고 두 서버를 재시작한다. 배포 프로필을 통합할 때에도 두 값을 배포 환경변수에 명시한다.
 - 테스트 분기는 `NIGHTVAULT_AI_MODE=mock`에서 확인한다. Python까지 호출할 때도 모의 타임아웃을 재현하려면 Spring 작업 제한을 기본 3초로 되돌린다.
 
 ## 개발 범위

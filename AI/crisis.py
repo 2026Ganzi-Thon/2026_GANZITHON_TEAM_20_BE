@@ -23,6 +23,9 @@ _DIRECT = re.compile(
 )
 _CANDIDATE = re.compile(
     r"자\s*살|자\s*해|극단적\s*선택|죽\s*고\s*싶|살\s*고\s*싶\s*지"
+    r"|죽\s*구\s*싶|죽\s*[고구]\s*시[퍼펐]"
+    r"|살\s*기\s*싫|죽\s*어\s*버리\s*고\s*싶"
+    r"|손목\s*(?:을\s*)?(?:그었|그어|그은|그을|긋)"
     r"|사라지고\s*싶|살\s*이유(?:가|는)?\s*없|(?:목숨|삶|생명)을?\s*(?:끊|끝\s*내|끝\s*낼)"
     r"|죽을\s*(?:생각|계획|거(?:야|예요))"
     r"|\b(?:suicid(?:e|al)|self[- ]harm|want\s+to\s+die|kill\s+myself|hurt\s+myself)\b"
