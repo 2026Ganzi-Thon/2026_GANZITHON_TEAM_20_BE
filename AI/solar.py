@@ -175,6 +175,10 @@ class SolarAnalyzer:
     async def _classify(self, text: str) -> CrisisDecision:
         content = await self._complete(text, CONTEXT_PROMPT, CONTEXT_RESPONSE_FORMAT, 48, temperature=0)
         try:
+            # Keep the advertised two-value schema. Accept only this exact legacy
+            # uncertainty response as guidance; malformed output remains a failure.
+            if json.loads(content) == {"decision": "NEEDS_CONTEXT"}:
+                return CrisisDecision.GUIDANCE
             return CrisisDecision[ContextAssessment.model_validate_json(content).decision]
         except (ValidationError, ValueError, TypeError):
             raise SolarFailure("INVALID_PROVIDER_RESPONSE") from None

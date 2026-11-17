@@ -113,17 +113,20 @@ async def analyze(
             async with asyncio.timeout(solar.timeout):
                 if assessing:
                     decision = await solar.assess_context(body.text)
-                    if decision is CrisisDecision.GUIDANCE:
+                    if decision in (CrisisDecision.GUIDANCE, CrisisDecision.NEEDS_CONTEXT):
                         return {**ids, "outcome": "SUPPORT_GUIDANCE", "guidanceCode": "S16"}
                     if decision is not CrisisDecision.GENERATE:
                         return {**ids, "outcome": "FAILURE", "failureCode": "ASSESSMENT_FAILED"}
                     assessing = False
                 content = await solar.analyze(body.text)
         except TimeoutError:
-            code = "ASSESSMENT_FAILED" if assessing else "PROVIDER_TIMEOUT"
-            return {**ids, "outcome": "FAILURE", "failureCode": code}
+            return {**ids, "outcome": "FAILURE", "failureCode": "PROVIDER_TIMEOUT"}
         except SolarFailure as error:
-            code = "ASSESSMENT_FAILED" if assessing else str(error)
+            code = str(error)
+            if code not in {"PROVIDER_TIMEOUT", "PROVIDER_RATE_LIMITED", "PROVIDER_UNAVAILABLE"}:
+                code = "ASSESSMENT_FAILED" if assessing else (
+                    code if code in {"INVALID_PROVIDER_RESPONSE", "INTERNAL_ERROR"} else "INTERNAL_ERROR"
+                )
             return {**ids, "outcome": "FAILURE", "failureCode": code}
         return {**ids, "outcome": "SUCCESS", "content": content.model_dump()}
 
