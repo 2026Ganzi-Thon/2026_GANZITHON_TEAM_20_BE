@@ -18,7 +18,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("local")
+@Profile({"local", "prod"})
 class LocalAnalysisWorker {
     private static final Logger LOG = LoggerFactory.getLogger(LocalAnalysisWorker.class);
     private static final int MOCK_TIMEOUT_SECONDS = 3;
@@ -30,7 +30,8 @@ class LocalAnalysisWorker {
     private final java.util.concurrent.ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
     LocalAnalysisWorker(AnalysisJobStore jobs, AnalysisPayloads payloads, PythonAnalysisClient python,
-                        @Value("${NIGHTVAULT_AI_TIMEOUT_SECONDS:3}") int httpTimeoutSeconds) {
+                        @Value("${NIGHTVAULT_AI_TIMEOUT_SECONDS:${nightvault.analysis.default-timeout-seconds:3}}")
+                        int httpTimeoutSeconds) {
         if (httpTimeoutSeconds < 1 || httpTimeoutSeconds > 120) {
             throw new IllegalArgumentException("NIGHTVAULT_AI_TIMEOUT_SECONDS must be between 1 and 120.");
         }
