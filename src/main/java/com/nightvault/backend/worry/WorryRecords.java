@@ -58,6 +58,8 @@ class WorryRecords {
     /**
      * 관련 과거 경험 (PAST-01·02). 관련성은 표시용 요약(수정본 우선, M-04)의 단어 겹침으로 계산한다.
      * 활동을 고르지 않은 기록도 후보에 넣는다. 그때 helpType은 null, helpful은 false다.
+     * 활동 중 하나라도 "도움 됨" 평가가 있으면 helpful은 true, helpType은 그 활동의 유형이다.
+     * 없으면 helpType은 가장 최근 활동의 유형이다.
      */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PastExperience pastExperience(UUID guestId, UUID worryId) {
@@ -87,9 +89,13 @@ class WorryRecords {
             return null;
         }
         var id = best.metadata().worryId();
+        var history = activityHistory.getIfAvailable();
+        var helpful = history == null ? java.util.Optional.<HelpType>empty() : history.latestHelpful(guestId, id);
+        if (helpful.isPresent()) {
+            return new PastExperience(id, bestSummary, helpful.get(), true);
+        }
         var choice = latestActivities(guestId, List.of(best)).get(id);
-        return new PastExperience(id, bestSummary, choice == null ? null : choice.type(),
-            choice != null && choice.helpful());
+        return new PastExperience(id, bestSummary, choice == null ? null : choice.type(), false);
     }
 
     private Map<UUID, WorryActivityHistory.Latest> latestActivities(UUID guestId, List<WorryAccess.VisibleWorry> rows) {

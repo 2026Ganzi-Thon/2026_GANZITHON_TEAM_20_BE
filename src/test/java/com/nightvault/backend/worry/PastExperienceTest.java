@@ -78,6 +78,49 @@ class PastExperienceTest extends ApiTestSupport {
     }
 
     @Test
+    void 이전_활동에_도움_됨이_있으면_최근_활동과_관계없이_그_활동의_유형을_준다() {
+        TestGuest guest = fixtures.guest();
+        Client client = client(guest);
+        TestWorry current = fixtures.publicWorry(guest);
+        TestWorry candidate = fixtures.publicWorry(guest);
+        rated(client, candidate, "EMPATHY", "HELPFUL");
+        clock.advance(java.time.Duration.ofMinutes(1));
+        rated(client, candidate, "EMPATHY", "NOT_HELPFUL");
+        clock.advance(java.time.Duration.ofMinutes(1));
+        client.post("/api/v1/worries/" + candidate.id() + "/activities", "{\"helpType\":\"ACTION\"}");
+
+        Response response = past(client, current);
+
+        assertThat(response.body().get("helpful").asBoolean()).isTrue();
+        assertThat(response.body().get("helpType").asString()).isEqualTo("EMPATHY");
+    }
+
+    @Test
+    void 도움_됨_평가가_없으면_helpful은_false고_최근_활동_유형을_준다() {
+        TestGuest guest = fixtures.guest();
+        Client client = client(guest);
+        TestWorry current = fixtures.publicWorry(guest);
+        TestWorry candidate = fixtures.publicWorry(guest);
+        rated(client, candidate, "EMPATHY", "UNSURE");
+        clock.advance(java.time.Duration.ofMinutes(1));
+        client.post("/api/v1/worries/" + candidate.id() + "/activities", "{\"helpType\":\"ACTION\"}");
+
+        Response response = past(client, current);
+
+        assertThat(response.body().get("helpful").asBoolean()).isFalse();
+        assertThat(response.body().get("helpType").asString()).isEqualTo("ACTION");
+    }
+
+    /** 활동을 시작·완료하고 평가한다. */
+    private void rated(Client client, TestWorry worry, String helpType, String answer) {
+        UUID activity = UUID.fromString(client.post("/api/v1/worries/" + worry.id() + "/activities",
+            "{\"helpType\":\"" + helpType + "\"}").body().get("activityId").asString());
+        assertThat(client.post("/api/v1/activities/" + activity + "/complete").status()).isEqualTo(200);
+        assertThat(client.put("/api/v1/activities/" + activity + "/feedback", "{\"answer\":\"" + answer + "\"}").status())
+            .isEqualTo(200);
+    }
+
+    @Test
     void 잠김_삭제_중_만료_다른_게스트의_기록은_후보가_아니다() {
         TestGuest guest = fixtures.guest();
         Client client = client(guest);

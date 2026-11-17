@@ -22,7 +22,7 @@
 - `POST /reflections/skip-today?timeZone=Asia/Seoul`은 해당 현지 날짜의 후보를 숨긴다. 서버는 현지 날짜와 함께 시간대·서버 시각을 저장하며, 같은 날 다시 보내면 처음 값을 유지한다.
 - `PUT /reflections/{worryId}?currentWorryId=...&timeZone=Asia/Seoul`에 `{"answer":"BETTER"}`를 보내 회고한다. `ONGOING`, `AS_FEARED`도 지원한다. 같은 답을 다시 보내면 `204`, 이미 다른 답을 했으면 `409 REFLECTION_ALREADY_ANSWERED`이며 처음 답을 유지한다. 지금 후보가 아니면 `409 REFLECTION_UNAVAILABLE`이다.
 - `GET /reflections/{worryId}`로 기록 상세에 표시할 기존 회고 응답과 응답 시각을 조회한다. 답하지 않았으면 `204`다.
-- `GET /worries/{worryId}/past-experience`는 같은 게스트의 공개·유효한 최근 기록에서 관련 경험 한 건을 반환한다. 관련성은 표시용 요약(수정본 우선)으로 계산하며 초기 기준은 최근 50건, 두 개 이상 공통 단어, Jaccard 유사도 0.2 이상이다. 활동을 고르지 않은 기록도 후보이며 이때 `helpType`은 `null`, `helpful`은 `false`다. 관련 기록이 없으면 `204`다.
+- `GET /worries/{worryId}/past-experience`는 같은 게스트의 공개·유효한 최근 기록에서 관련 경험 한 건을 반환한다. 관련성은 표시용 요약(수정본 우선)으로 계산하며 초기 기준은 최근 50건, 두 개 이상 공통 단어, Jaccard 유사도 0.2 이상이다. 활동을 고르지 않은 기록도 후보이며 이때 `helpType`은 `null`, `helpful`은 `false`다. 그 기록의 활동 중 하나라도 `HELPFUL` 평가가 있으면 `helpful`은 `true`, `helpType`은 그 활동의 유형이다(여럿이면 가장 최근에 평가한 활동). 없으면 `helpful`은 `false`, `helpType`은 가장 최근 활동의 유형이다. 관련 기록이 없으면 `204`다.
 
 ## 삭제와 만료
 
