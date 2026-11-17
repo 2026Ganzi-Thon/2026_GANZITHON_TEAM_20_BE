@@ -41,13 +41,13 @@ def assess_before_generation(
     assessor: Callable[[str], CrisisDecision] | None, text: str
 ) -> CrisisDecision:
     if assessor is None:
-        return CrisisDecision.FAILED
+        return CrisisDecision.NEEDS_CONTEXT
     try:
         return assessor(text)
     except Exception as error:
         # Assessment errors may include user input or a provider response.
         logger.warning("Crisis assessment failed (%s)", type(error).__name__)
-        return CrisisDecision.FAILED
+        return CrisisDecision.NEEDS_CONTEXT
 
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -108,12 +108,23 @@ async def analyze(
         decision = assess_before_generation(request.app.state.crisis_assessor, body.text)
         if decision is CrisisDecision.GUIDANCE:
             return {**ids, "outcome": "SUPPORT_GUIDANCE", "guidanceCode": "S16"}
-        if decision is not CrisisDecision.GENERATE:
-            return {**ids, "outcome": "FAILURE", "failureCode": "ASSESSMENT_FAILED"}
+        assessing = decision is not CrisisDecision.GENERATE
         try:
-            content = await solar.analyze(body.text)
+            async with asyncio.timeout(solar.timeout):
+                if assessing:
+                    decision = await solar.assess_context(body.text)
+                    if decision is CrisisDecision.GUIDANCE:
+                        return {**ids, "outcome": "SUPPORT_GUIDANCE", "guidanceCode": "S16"}
+                    if decision is not CrisisDecision.GENERATE:
+                        return {**ids, "outcome": "FAILURE", "failureCode": "ASSESSMENT_FAILED"}
+                    assessing = False
+                content = await solar.analyze(body.text)
+        except TimeoutError:
+            code = "ASSESSMENT_FAILED" if assessing else "PROVIDER_TIMEOUT"
+            return {**ids, "outcome": "FAILURE", "failureCode": code}
         except SolarFailure as error:
-            return {**ids, "outcome": "FAILURE", "failureCode": str(error)}
+            code = "ASSESSMENT_FAILED" if assessing else str(error)
+            return {**ids, "outcome": "FAILURE", "failureCode": code}
         return {**ids, "outcome": "SUCCESS", "content": content.model_dump()}
 
     match body.text:

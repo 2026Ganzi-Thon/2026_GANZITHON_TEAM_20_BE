@@ -1,3 +1,5 @@
+import asyncio
+import json
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
@@ -7,6 +9,7 @@ import httpx
 
 from crisis import CrisisDecision, assess_crisis
 from mock_api import app, lifespan
+from solar import SolarAnalyzer, SolarFailure
 
 
 class CrisisRoutingTest(IsolatedAsyncioTestCase):
@@ -21,7 +24,8 @@ class CrisisRoutingTest(IsolatedAsyncioTestCase):
         )
         content = {"summary": "합성 예시"}
         self.solar = AsyncMock(return_value=SimpleNamespace(model_dump=lambda: content))
-        app.state.solar = SimpleNamespace(analyze=self.solar)
+        self.assessment = AsyncMock(return_value=CrisisDecision.NEEDS_CONTEXT)
+        app.state.solar = SimpleNamespace(analyze=self.solar, assess_context=self.assessment, timeout=1)
         self.ids = {"requestId": str(uuid4()), "attemptId": str(uuid4())}
 
     async def submit(self):
@@ -40,6 +44,7 @@ class CrisisRoutingTest(IsolatedAsyncioTestCase):
         )
         assessor.assert_called_once_with("합성 테스트 입력")
         self.solar.assert_awaited_once_with("합성 테스트 입력")
+        self.assessment.assert_not_awaited()
 
     async def test_guidance_does_not_call_solar(self):
         app.state.crisis_assessor = Mock(return_value=CrisisDecision.GUIDANCE)
@@ -48,9 +53,10 @@ class CrisisRoutingTest(IsolatedAsyncioTestCase):
             await self.submit(), {**self.ids, "outcome": "SUPPORT_GUIDANCE", "guidanceCode": "S16"}
         )
         self.solar.assert_not_awaited()
+        self.assessment.assert_not_awaited()
 
-    async def test_missing_assessor_or_invalid_decision_cannot_fall_through(self):
-        for assessor in (None, Mock(return_value=CrisisDecision.FAILED), Mock(return_value="GENERATE")):
+    async def test_inconclusive_rule_and_context_do_not_start_generation(self):
+        for assessor in (None, Mock(return_value=CrisisDecision.NEEDS_CONTEXT), Mock(return_value="GENERATE")):
             with self.subTest(assessor=assessor):
                 app.state.crisis_assessor = assessor
                 self.assertEqual(
@@ -58,15 +64,57 @@ class CrisisRoutingTest(IsolatedAsyncioTestCase):
                 )
         self.solar.assert_not_awaited()
 
-    async def test_timeout_does_not_log_assessor_exception_text_or_call_solar(self):
+    async def test_rule_error_does_not_log_exception_text_and_can_use_context(self):
         app.state.crisis_assessor = Mock(side_effect=TimeoutError("synthetic exception content"))
+        self.assessment.return_value = CrisisDecision.GUIDANCE
 
         with self.assertLogs("mock_api", level="WARNING") as logs:
             self.assertEqual(
-                await self.submit(), {**self.ids, "outcome": "FAILURE", "failureCode": "ASSESSMENT_FAILED"}
+                await self.submit(), {**self.ids, "outcome": "SUPPORT_GUIDANCE", "guidanceCode": "S16"}
             )
         self.assertNotIn("synthetic exception content", "\n".join(logs.output))
         self.solar.assert_not_awaited()
+
+    async def test_third_party_or_movie_context_can_proceed_after_classification(self):
+        self.assessment.return_value = CrisisDecision.GENERATE
+        for text in ("친구가 죽고 싶다고 해서 걱정돼", "영화에서 죽고 싶다는 대사가 나왔어"):
+            with self.subTest(text=text):
+                self.assessment.reset_mock()
+                self.solar.reset_mock()
+                response = await self.client.post("/internal/v1/analyze", json={**self.ids, "text": text})
+                self.assertEqual(response.json()["outcome"], "SUCCESS")
+                self.assessment.assert_awaited_once_with(text)
+                self.solar.assert_awaited_once_with(text)
+
+    async def test_context_timeout_does_not_start_generation(self):
+        app.state.crisis_assessor = Mock(return_value=CrisisDecision.NEEDS_CONTEXT)
+        app.state.solar.timeout = .02
+        async def slow_context(_text):
+            await asyncio.sleep(1)
+
+        self.assessment.side_effect = slow_context
+        self.assertEqual(
+            await self.submit(), {**self.ids, "outcome": "FAILURE", "failureCode": "ASSESSMENT_FAILED"}
+        )
+        self.solar.assert_not_awaited()
+
+    async def test_context_and_generation_share_one_timeout(self):
+        app.state.crisis_assessor = Mock(return_value=CrisisDecision.NEEDS_CONTEXT)
+        app.state.solar.timeout = .2
+
+        async def slow_context(_text):
+            await asyncio.sleep(.08)
+            return CrisisDecision.GENERATE
+
+        async def slow_generation(_text):
+            await asyncio.sleep(.16)
+
+        self.assessment.side_effect = slow_context
+        self.solar.side_effect = slow_generation
+        self.assertEqual(
+            await self.submit(), {**self.ids, "outcome": "FAILURE", "failureCode": "PROVIDER_TIMEOUT"}
+        )
+        self.solar.assert_awaited_once()
 
     async def test_default_assessor_routes_before_solar(self):
         response = await self.client.post(
@@ -75,12 +123,61 @@ class CrisisRoutingTest(IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.json(), {**self.ids, "outcome": "SUPPORT_GUIDANCE", "guidanceCode": "S16"})
         self.solar.assert_not_awaited()
+        self.assessment.assert_not_awaited()
+
+    async def test_real_solar_client_classifies_then_generates_through_the_api(self):
+        schemas = []
+        generated = {
+            "summary": "합성 요약",
+            "recommendation": {"type": "ACTION", "reason": "합성 근거"},
+            "actionSteps": ["첫 단계", "둘째 단계", "셋째 단계"],
+            "restGuide": "합성 휴식",
+            "empathyMessage": "합성 공감",
+        }
+
+        def reply(request):
+            payload = json.loads(request.content)
+            schema = payload["response_format"]["json_schema"]["name"]
+            schemas.append(schema)
+            content = {"decision": "GENERATE"} if schema == "nightvault_crisis_context" else generated
+            return httpx.Response(200, json={"choices": [
+                {"finish_reason": "stop", "message": {"content": json.dumps(content)}}
+            ]})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as provider:
+            app.state.solar = SolarAnalyzer(provider, "synthetic", "synthetic", 1)
+            response = await self.client.post(
+                "/internal/v1/analyze",
+                json={**self.ids, "text": "친구가 죽고 싶다고 해서 걱정돼"},
+            )
+        self.assertEqual(response.json(), {**self.ids, "outcome": "SUCCESS", "content": generated})
+        self.assertEqual(schemas, ["nightvault_crisis_context", "nightvault_analysis"])
+
+    async def test_unavailable_context_provider_never_runs_generation(self):
+        received = []
+
+        def unavailable(request):
+            received.append(json.loads(request.content)["response_format"]["json_schema"]["name"])
+            return httpx.Response(503)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(unavailable)) as provider:
+            app.state.solar = SolarAnalyzer(provider, "synthetic", "synthetic", 1)
+            response = await self.client.post(
+                "/internal/v1/analyze",
+                json={**self.ids, "text": "영화에서 ‘죽고 싶다’는 대사를 봤어"},
+            )
+        self.assertEqual(response.json(), {**self.ids, "outcome": "FAILURE", "failureCode": "ASSESSMENT_FAILED"})
+        self.assertEqual(received, ["nightvault_crisis_context"])
 
 
 class CrisisAssessmentTest(TestCase):
     def test_representative_signals_and_contexts(self):
         cases = [
             ("지금 죽고 싶어요.", CrisisDecision.GUIDANCE),
+            ("동료가 괴롭혀서 죽고 싶어", CrisisDecision.GUIDANCE),
+            ("살고 싶지 않아", CrisisDecision.GUIDANCE),
+            ("주인공이 살고 싶지 않다고 말했다", CrisisDecision.NEEDS_CONTEXT),
+            ("친구가 힘들다고 했는데 난 지금 죽고 싶어", CrisisDecision.GUIDANCE),
             ("자해를 했어요.", CrisisDecision.GUIDANCE),
             ("오늘 제 삶을 끝내려고 해요.", CrisisDecision.GUIDANCE),
             ("내 삶을 끝낼 계획을 세웠어요.", CrisisDecision.GUIDANCE),
@@ -88,16 +185,43 @@ class CrisisAssessmentTest(TestCase):
             ("예전에는 힘들었지만 지금은 죽고 싶어요.", CrisisDecision.GUIDANCE),
             ("지금 죽\u200b고싶어요.", CrisisDecision.GUIDANCE),
             ("I want to die.", CrisisDecision.GUIDANCE),
-            ("죽고 싶지는 않아요.", CrisisDecision.FAILED),
-            ("친구가 죽고 싶다고 했어요.", CrisisDecision.FAILED),
-            ("예전에 죽고 싶었어요.", CrisisDecision.FAILED),
-            ("영화에서 “죽고 싶다”는 대사를 들었어요.", CrisisDecision.FAILED),
-            ("그냥 사라지고 싶은 기분이에요.", CrisisDecision.FAILED),
-            ("살 이유가 없는 것 같아요.", CrisisDecision.FAILED),
-            ("자살 관련 기사를 봤어요.", CrisisDecision.FAILED),
+            ("죽고 싶지는 않아요.", CrisisDecision.NEEDS_CONTEXT),
+            ("친구가 죽고 싶다고 했어요.", CrisisDecision.NEEDS_CONTEXT),
+            ("예전에 죽고 싶었어요.", CrisisDecision.NEEDS_CONTEXT),
+            ("영화에서 “죽고 싶다”는 대사를 들었어요.", CrisisDecision.NEEDS_CONTEXT),
+            ("그냥 사라지고 싶은 기분이에요.", CrisisDecision.NEEDS_CONTEXT),
+            ("살 이유가 없는 것 같아요.", CrisisDecision.NEEDS_CONTEXT),
+            ("자살 관련 기사를 봤어요.", CrisisDecision.NEEDS_CONTEXT),
             ("내일 발표가 너무 걱정돼요.", CrisisDecision.GENERATE),
             ("창피해서 죽을 만큼 힘들었어요.", CrisisDecision.GENERATE),
         ]
         for text, expected in cases:
             with self.subTest(text=text):
                 self.assertIs(assess_crisis(text), expected)
+
+
+class SolarContextContractTest(IsolatedAsyncioTestCase):
+    async def test_context_request_expects_only_a_decision_and_sends_only_worry_text(self):
+        def reply(request):
+            payload = json.loads(request.content)
+            self.assertEqual(payload["response_format"]["json_schema"]["name"], "nightvault_crisis_context")
+            self.assertEqual(json.loads(payload["messages"][1]["content"]), {"worry": "합성 입력"})
+            self.assertEqual(set(payload["response_format"]["json_schema"]["schema"]["properties"]), {"decision"})
+            return httpx.Response(200, json={"choices": [
+                {"finish_reason": "stop", "message": {"content": '{"decision":"GUIDANCE"}'}}
+            ]})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+            analyzer = SolarAnalyzer(client, "synthetic", "synthetic", 1)
+            self.assertIs(await analyzer.assess_context("합성 입력"), CrisisDecision.GUIDANCE)
+
+    async def test_invalid_context_response_does_not_become_generate(self):
+        def reply(_request):
+            return httpx.Response(200, json={"choices": [
+                {"finish_reason": "stop", "message": {"content": '{"decision":"SAFE"}'}}
+            ]})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+            analyzer = SolarAnalyzer(client, "synthetic", "synthetic", 1)
+            with self.assertRaisesRegex(SolarFailure, "INVALID_PROVIDER_RESPONSE"):
+                await analyzer.assess_context("합성 입력")
