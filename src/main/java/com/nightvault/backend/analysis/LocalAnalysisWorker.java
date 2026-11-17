@@ -7,6 +7,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import com.nightvault.backend.demo.DemoSamples;
 import com.nightvault.backend.worry.HelpType;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -80,6 +81,9 @@ class LocalAnalysisWorker {
     }
 
     private AnalysisJobStore.Result analyze(AnalysisJobStore.Job job) throws InterruptedException {
+        if (job.demoGuest()) {
+            return new AnalysisJobStore.Result(AnalysisJobStore.Outcome.SUCCESS, DemoSamples.forSubmission());
+        }
         var input = payloads.decryptInput(job.requestId(), job.encryptedInput());
         return python.configured() ? python.analyze(job.requestId(), job.attemptId(), input) : mock(input);
     }

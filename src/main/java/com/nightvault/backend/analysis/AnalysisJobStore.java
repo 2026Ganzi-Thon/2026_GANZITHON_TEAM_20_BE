@@ -61,7 +61,7 @@ class AnalysisJobStore {
         var now = OffsetDateTime.now(clock);
         return jdbc.sql("""
             WITH candidate AS (
-                SELECT r.id
+                SELECT r.id, g.kind = 'DEMO' AS demo_guest
                 FROM analysis_requests r
                 JOIN guests g ON g.id = r.guest_id AND g.state = 'ACTIVE'
                 WHERE r.expires_at > :now
@@ -76,13 +76,13 @@ class AnalysisJobStore {
             SET state = 'RUNNING', attempt_id = gen_random_uuid(), attempt_count = r.attempt_count + 1,
                 lease_until = :leaseUntil
             FROM candidate WHERE r.id = candidate.id
-            RETURNING r.id, r.guest_id, r.attempt_id, r.input_ciphertext
+            RETURNING r.id, r.guest_id, r.attempt_id, r.input_ciphertext, candidate.demo_guest
             """)
             .param("limit", MAX_ATTEMPTS).param("now", now)
             .param("leaseUntil", now.plusSeconds(timeoutSeconds + LEASE_GRACE_SECONDS))
             .query((row, rowNumber) -> new Job(row.getObject("id", UUID.class),
                 row.getObject("guest_id", UUID.class), row.getObject("attempt_id", UUID.class),
-                row.getBytes("input_ciphertext")))
+                row.getBytes("input_ciphertext"), row.getBoolean("demo_guest")))
             .optional();
     }
 
@@ -162,7 +162,7 @@ class AnalysisJobStore {
             .param("id", requestId).update();
     }
 
-    record Job(UUID requestId, UUID guestId, UUID attemptId, byte[] encryptedInput) {}
+    record Job(UUID requestId, UUID guestId, UUID attemptId, byte[] encryptedInput, boolean demoGuest) {}
     record Result(Outcome outcome, AnalysisContent content) {}
 
     enum Outcome { SUCCESS, SUPPORT_GUIDANCE, FAILURE, RETRYABLE_FAILURE }

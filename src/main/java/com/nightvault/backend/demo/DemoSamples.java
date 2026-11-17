@@ -8,16 +8,31 @@ import com.nightvault.backend.analysis.AnalysisContent.Recommendation;
 import com.nightvault.backend.worry.HelpType;
 
 /**
- * 시연 프리셋(DEMO-03) 예시 콘텐츠. 실제 AI 응답과 구분되도록 모든 문구 앞에 {@value #MARK}를 붙인다.
+ * 시연 프리셋(DEMO-03)과 시연 게스트 제출용 예시 콘텐츠. 실제 AI 응답과 구분되도록 {@value #MARK}를 사용한다.
  * 위기 안내(SUPPORT_GUIDANCE) 예시는 두지 않아 시연에서 전화 연결 화면이 자동으로 열리지 않는다.
  */
-final class DemoSamples {
+public final class DemoSamples {
     static final String MARK = "[시연 예시] ";
 
     /** 분석 실패 예시는 걱정 행 없이 실패한 요청만 만든다. 홈 실패 카드는 접수 후 24시간 동안 보인다. */
     static final Duration FAILED_ACCEPTED_AGO = Duration.ofMinutes(5);
 
+    private static final AnalysisContent SUBMISSION = content(
+        "지금 마음에 걸린 걱정을 기록했어요.", HelpType.ACTION,
+        "지금 할 수 있는 일을 작은 단계로 나누는 흐름을 확인할 수 있어요.",
+        List.of(
+            MARK + "마음에 걸리는 점 하나를 적어 봐요.",
+            MARK + "지금 할 수 있는 작은 행동을 하나 골라 봐요.",
+            MARK + "해 본 일을 짧게 적어 봐요."
+        )
+    );
+
     private DemoSamples() {}
+
+    /** 시연 게스트의 새 제출과 재시도에 쓰는 고정 응답. */
+    public static AnalysisContent forSubmission() {
+        return SUBMISSION;
+    }
 
     enum Kind { LOCKED, PUBLISHED, REFLECTION }
 
