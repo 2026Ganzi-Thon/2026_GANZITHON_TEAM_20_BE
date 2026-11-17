@@ -213,7 +213,7 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 |---|---|---|
 | `GET /vault/summary` | 200 `{ lockedCount, publicCount, nearestPublishAt, analysisRequests }` | |
 | `GET /worries?visibility=LOCKED\|PUBLIC&cursor&limit` | 200 `{ visibility, items, nextCursor }` | 400 `INVALID_INPUT`(`limit` 1~100 밖, 다른 목록의 커서) |
-| `GET /worries/{worryId}` | 200 잠금이면 `LockedDetail`, 공개면 `PublicDetail` | 404 `NOT_FOUND` |
+| `GET /worries/{worryId}` | 200 잠금이면 `LockedDetail`, 공개면 `PublicDetail`(`summary` 수정본 우선, `summaryEdited`, `analysis`에는 요약 없음) | 404 `NOT_FOUND` |
 | `PATCH /worries/{worryId}/publication` `{ publishAt }` | 200 `LockedDetail` | 409 `ALREADY_PUBLIC`, 422 `INVALID_PUBLICATION`(지금 이전이거나 만료 이후) |
 | `POST /worries/{worryId}/view` | 200 `{ firstViewedAt }` | 409 `WORRY_LOCKED` |
 
@@ -221,9 +221,9 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 
 | 메서드·경로 | 응답 | 주요 오류 |
 |---|---|---|
-| `GET /records?cursor&limit` | 200 `{ items, nextCursor }` | 400 `INVALID_INPUT` |
-| `GET /records/{worryId}` | 200 `PublicDetail` | 404 `NOT_FOUND`(잠금 걱정 포함) |
-| `GET /worries/{worryId}/past-experience` | 200 `{ worryId, summary, helpType, helpful }`, 비슷한 경험 없으면 204 | 404 `NOT_FOUND` |
+| `GET /records?cursor&limit` | 200 `{ items, nextCursor }`, 항목에 `summaryEdited` 포함 | 400 `INVALID_INPUT` |
+| `GET /records/{worryId}` | 200 `PublicDetail`. 활동 이력·평가는 `GET /worries/{worryId}/activities`, 회고는 `GET /reflections/{worryId}`로 따로 조회 | 404 `NOT_FOUND`(잠금 걱정 포함) |
+| `GET /worries/{worryId}/past-experience` | 200 `{ worryId, summary, helpType, helpful }`, 비슷한 경험 없으면 204. 활동을 고르지 않은 기록이면 `helpType: null`. `helpful: true`면 `helpType`은 도움 된 활동의 유형 | 404 `NOT_FOUND`(현재 걱정이 잠김이어도 404) |
 | `PUT /worries/{worryId}/summary` `{ summary }` | 204 | 400 `INVALID_INPUT`(빈 값·500자 초과), 409 `WORRY_LOCKED` |
 | `PUT /worries/{worryId}/anxiety` `{ anxietyAfter: 1~5 }` | 204 | 400 `INVALID_INPUT`, 409 `WORRY_LOCKED` |
 
@@ -233,10 +233,10 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 
 | 메서드·경로 | 응답 | 주요 오류 |
 |---|---|---|
-| `GET /reflections/candidate?currentWorryId&timeZone` | 200 `{ worryId, firstAvailableAt }`, 후보 없으면 204 | |
-| `POST /reflections/skip-today?timeZone` | 204 (오늘 하루 후보 숨김) | |
+| `GET /reflections/candidate?currentWorryId&timeZone` | 200 `{ worryId, firstAvailableAt, summary, summaryEdited }`(요약은 수정본 우선), 후보 없으면 204 | |
+| `POST /reflections/skip-today?timeZone` | 204 (오늘 하루 후보 숨김). 같은 날 판단은 후보 조회 때 보낸 `timeZone` 기준 | |
 | `GET /reflections/{worryId}` | 200 `{ answer, respondedAt }`, 답 없으면 204 | 409 `WORRY_LOCKED` |
-| `PUT /reflections/{worryId}?currentWorryId&timeZone` `{ answer: BETTER \| ONGOING \| AS_FEARED }` | 204 (같은 답 재전송도 204) | 409 `REFLECTION_UNAVAILABLE`(지금 후보가 아님) |
+| `PUT /reflections/{worryId}?currentWorryId&timeZone` `{ answer: BETTER \| ONGOING \| AS_FEARED }` | 204 (같은 답 재전송도 204) | 409 `REFLECTION_UNAVAILABLE`(지금 후보가 아님), 409 `REFLECTION_ALREADY_ANSWERED`(이미 다른 답) |
 
 ### 삭제
 
@@ -245,7 +245,8 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 | `DELETE /worries/{worryId}` | 204 삭제 완료, 202 `{ status: "DELETING" }` 처리 중 | 404 `NOT_FOUND` |
 | `DELETE /vault` | 204, 게스트 쿠키 삭제 | |
 
-- 202면 서버가 백그라운드에서 마저 지운다. 목록을 다시 조회하면 사라져 있다.
+- 보통은 바로 204다. 202면 서버가 백그라운드에서 마저 지운다. 목록을 다시 조회하면 사라져 있다.
+- 만료된 걱정에 삭제를 보내도 204다(이미 지워졌거나 지금 지움).
 - `DELETE /vault` 후에는 게스트 세션과 CSRF 토큰이 모두 없어진다. 3절 흐름(온보딩)으로 보내고, 다음 요청 전에 CSRF 토큰을 다시 받는다(`csrf = null`).
 
 ## 8. 배포 시 주의
