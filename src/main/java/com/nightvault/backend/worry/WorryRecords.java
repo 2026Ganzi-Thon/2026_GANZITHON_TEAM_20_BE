@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class WorryRecords {
     private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}]{2,}");
+    private static final double MIN_SCORE = 0.2;
     private final WorryAccess access;
     private final VaultService vault;
     private final ObjectProvider<WorryActivityHistory> activityHistory;
@@ -54,39 +55,41 @@ class WorryRecords {
         return new RecordPage(items, rows.size() > limit ? VaultService.encodeCursor(VaultService.Visibility.PUBLIC, page.getLast().metadata()) : null);
     }
 
+    /**
+     * 관련 과거 경험 (PAST-01·02). 관련성은 표시용 요약(수정본 우선, M-04)의 단어 겹침으로 계산한다.
+     * 활동을 고르지 않은 기록도 후보에 넣는다. 그때 helpType은 null, helpful은 false다.
+     */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PastExperience pastExperience(UUID guestId, UUID worryId) {
         var current = access.find(guestId, worryId);
         if (current.encrypted() == null) {
             throw new BusinessException(ApiError.NOT_FOUND);
         }
-        var words = words(vault.readInput(current).text());
+        var words = words(vault.displaySummary(current));
         if (words.size() < 2) {
             return null;
         }
         WorryAccess.VisibleWorry best = null;
-        double bestScore = 0.2;
-        var candidates = access.pastCandidates(guestId, worryId);
-        var history = latestActivities(guestId, candidates);
-        for (var row : candidates) {
-            var choice = history.get(row.metadata().worryId());
-            if (choice == null) {
-                continue;
-            }
-            var candidateWords = words(vault.readInput(row).text());
+        String bestSummary = null;
+        double bestScore = 0;
+        for (var row : access.pastCandidates(guestId, worryId)) {
+            var summary = vault.displaySummary(row);
+            var candidateWords = words(summary);
             long common = candidateWords.stream().filter(words::contains).count();
             double score = (double) common / Math.max(1, words.size() + candidateWords.size() - common);
-            if (common >= 2 && score >= 0.2 && (best == null || score > bestScore)) {
+            if (common >= 2 && score >= MIN_SCORE && (best == null || score > bestScore)) {
                 bestScore = score;
                 best = row;
+                bestSummary = summary;
             }
         }
         if (best == null) {
             return null;
         }
         var id = best.metadata().worryId();
-        var choice = history.get(id);
-        return new PastExperience(id, vault.displaySummary(best), choice.type(), choice.helpful());
+        var choice = latestActivities(guestId, List.of(best)).get(id);
+        return new PastExperience(id, bestSummary, choice == null ? null : choice.type(),
+            choice != null && choice.helpful());
     }
 
     private Map<UUID, WorryActivityHistory.Latest> latestActivities(UUID guestId, List<WorryAccess.VisibleWorry> rows) {
