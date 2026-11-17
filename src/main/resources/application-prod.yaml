@@ -1,16 +1,23 @@
 server:
-  address: "${NIGHTVAULT_BIND_ADDRESS:0.0.0.0}"
+  address: "${NIGHTVAULT_BIND_ADDRESS:127.0.0.1}"
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      # Same-host HTTPS proxy only. Never trust arbitrary internet clients.
+      internal-proxies: '127\.0\.0\.1|::1|0:0:0:0:0:0:0:1'
   servlet:
     session:
       cookie:
         secure: true
 
 spring:
+  flyway:
+    out-of-order: "${NIGHTVAULT_FLYWAY_OUT_OF_ORDER:false}"
   datasource:
-    url: "${NIGHTVAULT_DB_URL}"
-    username: "${NIGHTVAULT_DB_USER}"
-    password: "${NIGHTVAULT_DB_PASSWORD}"
+    url: "${NIGHTVAULT_DB_URL:}"
+    username: "${NIGHTVAULT_DB_USER:}"
+    password: "${NIGHTVAULT_DB_PASSWORD:}"
 
 nightvault:
   analysis:
-    default-timeout-seconds: 12
+    default-timeout-seconds: 27

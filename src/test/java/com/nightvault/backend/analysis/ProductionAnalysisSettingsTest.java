@@ -14,7 +14,7 @@ class ProductionAnalysisSettingsTest {
 
     private final ApplicationContextRunner analysis = new ApplicationContextRunner()
         .withUserConfiguration(
-            LocalAnalysisWorker.class, PythonAnalysisClient.class, ProductionAnalysisSettings.class,
+            AnalysisWorker.class, PythonAnalysisClient.class, ProductionAnalysisSettings.class,
             AnalysisPayloads.class
         )
         .withBean(JsonMapper.class, () -> JsonMapper.builder().build())
@@ -23,7 +23,7 @@ class ProductionAnalysisSettingsTest {
     @Test
     void prodStartsTheWorkerWithAnAuthenticatedPythonEndpoint() {
         production().run(context -> {
-            assertThat(context).hasSingleBean(LocalAnalysisWorker.class);
+            assertThat(context).hasSingleBean(AnalysisWorker.class);
             assertThat(context).hasSingleBean(PythonAnalysisClient.class);
             assertThat(context.getBean(PythonAnalysisClient.class).configured()).isTrue();
         });
@@ -60,11 +60,11 @@ class ProductionAnalysisSettingsTest {
     void localStillAllowsTheBuiltInMockAndTestHasNoWorker() {
         analysis.withInitializer(context -> context.getEnvironment().setActiveProfiles("local"))
             .run(context -> {
-                assertThat(context).hasSingleBean(LocalAnalysisWorker.class);
+                assertThat(context).hasSingleBean(AnalysisWorker.class);
                 assertThat(context.getBean(PythonAnalysisClient.class).configured()).isFalse();
             });
         analysis.withInitializer(context -> context.getEnvironment().setActiveProfiles("test"))
-            .run(context -> assertThat(context).doesNotHaveBean(LocalAnalysisWorker.class));
+            .run(context -> assertThat(context).doesNotHaveBean(AnalysisWorker.class));
     }
 
     private ApplicationContextRunner production() {

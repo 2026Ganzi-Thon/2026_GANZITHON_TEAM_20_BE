@@ -12,33 +12,41 @@
 
 ## Python 테스트 서버 실행
 
+먼저 저장소 루트의 `.env`에 `NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/analyze`와 무작위 `NIGHTVAULT_AI_TOKEN`을 추가한다. 토큰 생성은 [배포 절차의 내부 토큰 항목](../docs/deployment.md)을 참고한다. 내부 Bearer 토큰은 모의 모드에서도 필수다.
+
 Windows PowerShell에서 저장소 루트로 이동한 뒤 실행한다.
 
 ```powershell
+$env:NIGHTVAULT_ENV = "local"
 python -m venv .\AI\.venv
 .\AI\.venv\Scripts\python.exe -m pip install -r .\AI\requirements.txt
 .\AI\.venv\Scripts\python.exe -m uvicorn mock_api:app --app-dir AI --host 127.0.0.1 --port 8001 --no-access-log
 ```
 
-Spring의 루트 `.env`에 `NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/analyze`를 추가하고 `local` 프로필로 Spring을 시작한다. 선택적으로 내부 Bearer 인증을 테스트하려면 Python을 시작하는 PowerShell과 Spring의 `.env`에 동일한 `NIGHTVAULT_AI_TOKEN`을 설정한다.
+가상환경이 준비된 Cursor Git Bash에서는 아래 명령으로 시작한다. Spring은 같은 `.env`를 사용하는 `local` 프로필로 실행한다.
+
+```bash
+NIGHTVAULT_ENV=local ./AI/.venv/Scripts/python.exe -m uvicorn mock_api:app --app-dir AI --host 127.0.0.1 --port 8001 --no-access-log
+```
 
 일반 입력은 고정된 성공 콘텐츠를 반환한다. `[mock:guidance]`는 S-16 도움 안내, `[mock:failure]`는 최종 실패, `[mock:timeout]`은 Spring의 로컬 작업 제한 시간 3초를 넘기는 응답을 만든다. 연결 실패와 시간 초과는 기존 작업 큐에서 최초 시도를 포함해 최대 3번 처리한다. 이 서버는 합성 입력으로 내부 HTTP 계약을 확인하는 용도다.
 
 ## Solar 연동 확인
 
-저장소 루트의 `.env`에 발급한 `UPSTAGE_API_KEY`를 설정한 뒤 아래 값을 추가한다. 앞의 Python 실행 명령으로 의존성을 설치하고 Python과 Spring을 다시 시작한다. Python 설정은 프로세스 환경변수를 우선 읽고, 값이 없으면 저장소 루트의 `.env`를 읽는다.
+저장소 루트의 `.env`에 발급한 `UPSTAGE_API_KEY`를 설정한 뒤 아래 값을 추가한다. 앞의 Python 실행 명령으로 의존성을 설치하고 Python과 Spring을 다시 시작한다. Python은 `NIGHTVAULT_ENV=local`이 프로세스 환경변수에 명시된 경우에 `.env`를 읽고, 같은 이름의 프로세스 환경변수가 있으면 우선 사용한다. 기본 환경은 `prod`이며 이때 `.env`를 읽지 않는다. `SPRING_PROFILES_ACTIVE`에 `prod`가 있으면서 Python 환경을 `local`로 지정하면 기동이 실패한다.
 
 ```dotenv
 NIGHTVAULT_AI_MODE=solar
 NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/analyze
 UPSTAGE_MODEL=solar-mini4
-UPSTAGE_TIMEOUT_SECONDS=10
-NIGHTVAULT_AI_TIMEOUT_SECONDS=12
+UPSTAGE_TIMEOUT_SECONDS=24
+NIGHTVAULT_AI_TIMEOUT_SECONDS=27
 ```
 
 - 합성 걱정을 Spring의 제출 API에 보내고 `requestId`로 조회해 `SUCCEEDED`를 확인한다. Python은 걱정 원문만 Solar에 전달하고, 요약·추천·액션 3단계·휴식·공감의 응답 계약을 확인한다. 모델과 연동을 검증하는 로컬 모드이며 실제 위기 대응 연결은 별도 정책에 따른다.
 - Spring 작업 제한은 Python의 모델 호출 제한보다 길게 설정한다. PostgreSQL 선점 기한은 Spring 작업 제한에 저장 여유 5초를 더한다. 시간 초과·호출 한도·일시 장애는 Spring이 최대 3회 시도하고, 형식 오류와 자격 증명 오류는 최종 실패로 처리한다.
 - 테스트 분기는 `NIGHTVAULT_AI_MODE=mock`에서 확인한다. Python까지 호출할 때도 모의 타임아웃을 재현하려면 Spring 작업 제한을 기본 3초로 되돌린다.
+- 배포에서는 [발표 서버 배포 절차](../docs/deployment.md)에 따라 JDK 21, HTTPS와 같은 출처 프록시, 사설 Python 주소, 토큰과 데이터 키를 준비한다. #14 위기 대응 변경을 통합하고 S-16 화면 연동을 검증한 뒤 Solar 모드를 활성화한다.
 
 ## 개발 범위
 

@@ -2,6 +2,8 @@
 
 React + Vite + JavaScript + React Router + Axios 기준. 상세 스펙은 [openapi.yaml](openapi.yaml)을 본다.
 
+2026-11-18 실제 프런트 브랜치와 대조한 미완료 항목·검증 결과는 [프런트 연동·보안 점검](../frontend-integration-review.md)을 함께 본다.
+
 ## 1. 개발 프록시 (Vite)
 
 ```js
@@ -39,7 +41,7 @@ export default defineConfig({
 // src/api/client.js
 import axios from 'axios';
 
-export const api = axios.create({ baseURL: '/api/v1' });
+export const api = axios.create({ baseURL: '/api/v1', withCredentials: true });
 
 const UNSAFE = ['post', 'put', 'patch', 'delete'];
 let csrf = null; // { token, headerName }
@@ -60,15 +62,17 @@ api.interceptors.request.use(async (config) => {
 
 api.interceptors.response.use(
   async (res) => {
-    // 세션 발급 후 서버가 CSRF 토큰을 버리므로 다시 받는다
-    if (res.config.url === '/guest-sessions' && res.config.method === 'post') {
-      await fetchCsrf();
+    // 게스트 교체·전체 삭제 후 이전 토큰을 버리고, 다음 변경 요청 전에 다시 받는다.
+    const { url, method } = res.config;
+    if ((method === 'post' && ['/guest-sessions', '/demo/session'].includes(url)) ||
+        (method === 'delete' && url === '/vault')) {
+      csrf = null;
     }
     return res;
   },
   async (error) => {
     const { config, response } = error;
-    if (response?.status === 403 && response.data?.code === 'CSRF_REJECTED' && !config._csrfRetried) {
+    if (config && response?.status === 403 && response.data?.code === 'CSRF_REJECTED' && !config._csrfRetried) {
       config._csrfRetried = true;
       await fetchCsrf();
       return api(config); // 1회만 재시도
@@ -80,6 +84,8 @@ api.interceptors.response.use(
 /** 오류 응답에서 코드만 꺼낸다. 네트워크 오류면 null */
 export const errorCode = (error) => error.response?.data?.code ?? null;
 ```
+
+위 코드는 최소 예시다. FE1·FE2가 토큰 저장소를 공유하고, 최초 `/csrf` 동시 호출은 하나의 Promise로 합친다. 게스트 교체 중에는 이전 요청을 취소하고 교체 완료 뒤 새 토큰을 받는다. 자동 재전송은 명시적인 `CSRF_REJECTED`에 한 번만 적용한다. 타임아웃·일반 403·네트워크 오류에는 변경 요청을 자동 재전송하지 않는다.
 
 ## 3. 앱 시작 흐름
 
@@ -114,7 +120,7 @@ export const restartGuest = () => api.post('/guest-sessions', { mode: 'RESTART' 
 
 ## 4. 오류 응답
 
-모든 오류는 같은 형식이다. 화면 분기는 `code`로 하고, `message`는 그대로 띄워도 되는 한국어 문구다.
+처리된 API 오류는 아래 형식이다. 화면 분기는 `code`로 하고, `message`는 그대로 띄워도 되는 한국어 문구다. 네트워크 단절·프록시 오류·처리되지 않은 서버 오류는 JSON이나 이 형식을 보장하지 않으므로 별도 기본 안내를 표시한다. 오류 객체 전체에는 요청 본문·헤더가 들어갈 수 있으므로 운영 콘솔이나 수집기로 그대로 보내지 않는다.
 
 ```json
 { "code": "OPEN_ACTIVITY_EXISTS", "message": "진행 중인 도움이 있어요." }
@@ -124,7 +130,7 @@ export const restartGuest = () => api.post('/guest-sessions', { mode: 'RESTART' 
 
 | 상태 | code | 화면 처리 |
 |---|---|---|
-| 400 | `INVALID_INPUT` | 요청 값 버그. 토스트 + 콘솔 로그 |
+| 400 | `INVALID_INPUT` | 입력값 확인. 로그가 필요하면 상태·코드만 남김 |
 | 401 | `GUEST_SESSION_REQUIRED` / `GUEST_SESSION_INVALID` | 3절 표 |
 | 403 | `CSRF_REJECTED` | 인터셉터가 1회 재시도. 그래도 실패하면 토스트 |
 | 403 | `FORBIDDEN` | CSRF 외 접근 거부. 토스트 |
@@ -134,6 +140,7 @@ export const restartGuest = () => api.post('/guest-sessions', { mode: 'RESTART' 
 
 - 오류 응답은 전역 예외 처리(`ApiExceptionHandler`)가 같은 형식으로 만든다. JSON 파싱 실패, 필수 쿼리·헤더 누락, 경로 UUID 형식 오류도 모두 400 `INVALID_INPUT`이고, DB 오류는 503 `TEMPORARILY_UNAVAILABLE`이다.
 - 오류 응답에는 `Cache-Control: no-store`가 붙는다.
+- 존재하지 않는 API 경로는 404 `NOT_FOUND`, 잘못된 HTTP 메서드는 405 `METHOD_NOT_ALLOWED`(`Allow` 유지), JSON을 받을 수 없는 `Accept`는 406 `NOT_ACCEPTABLE`, 지원하지 않는 요청 본문 형식은 415 `UNSUPPORTED_MEDIA_TYPE`이다. 프록시가 이 상태를 200 HTML로 바꾸지 않아야 한다.
 
 ### 활동 (BE2)
 
@@ -201,7 +208,7 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 | `PUT /worries/{worryId}/activities/{activityId}/feedback` | `{ answer }` |
 
 - 호환 경로의 상태 오류는 모두 409 `ACTIVITY_CONFLICT`다.
-- **새 화면에서 활동 시작에 `Idempotency-Key`를 붙이지 않는다.** 붙이면 응답이 호환 모양으로 바뀐다.
+- 새 화면의 기본 호출에는 활동 시작용 `Idempotency-Key`를 생략한다. 키를 붙이고 `replaceOpen`을 생략한 경우에만 호환 응답이 된다. 최신 FE2처럼 `replaceOpen: false`를 명시하면 키가 있어도 새 응답을 받는다. 현재 FE2 호출 자체가 잘못된 것은 아니지만, 공통 인터셉터에서 키나 본문 필드를 임의로 추가·제거하지 않는다.
 
 ## 7. 금고·기록·회고·삭제
 
@@ -245,11 +252,11 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 | `DELETE /worries/{worryId}` | 204 삭제 완료, 202 `{ status: "DELETING" }` 처리 중 | 404 `NOT_FOUND` |
 | `DELETE /vault` | 204, 게스트 쿠키 삭제 | |
 
-- 202면 서버가 백그라운드에서 마저 지운다. 목록을 다시 조회하면 사라져 있다.
+- 202는 삭제 접수이며 완료가 아니다. 응답은 `{ status: "DELETING" }`이고 삭제 작업 ID나 작업 조회 API는 없다. 삭제 중 목록에서 숨겨지는 것도 완료 증거가 아니다. 최신 develop은 동기 정리를 먼저 시도하며, 같은 소유자의 동일 ID 삭제를 다시 요청하면 완료 영수증을 통해 204를 확인할 수 있다. 이 계약으로 횟수·간격을 제한한 재확인을 구현할지 FE·BE가 합의해야 한다. 404나 타임아웃을 삭제 완료로 간주하지 않는다.
 - `DELETE /vault` 후에는 게스트 세션과 CSRF 토큰이 모두 없어진다. 3절 흐름(온보딩)으로 보내고, 다음 요청 전에 CSRF 토큰을 다시 받는다(`csrf = null`).
 
 ## 8. 배포 시 주의
 
-- 이 가이드는 **프런트와 API가 같은 도메인**(리버스 프록시: `https://app.example.com/` → 프런트, `/api/` → 백엔드)인 전제다. 그래서 CORS 설정이 없고 쿠키가 `SameSite=Lax`다.
+- 이 가이드는 **프런트와 API가 같은 HTTPS 출처**(스킴·호스트·포트가 같음, 리버스 프록시: `https://app.example.com/` → 프런트, `/api/` → 백엔드)인 전제다. 그래서 CORS 설정이 없고 쿠키가 `SameSite=Lax`다.
 - 운영 쿠키는 `Secure`라 **HTTPS**에서만 저장된다.
-- 프런트와 API를 **다른 도메인**에 두면 지금 설정으로는 동작하지 않는다(CORS 미허용, `SameSite=Lax` 쿠키 미전송). 이 경우 BE1 보안 설정(`GuestSecurityConfiguration`의 CORS, 쿠키 `SameSite`)을 바꿔야 하니 BE1과 먼저 협의한다.
+- 출처가 다르면 현재 CORS 미허용 때문에 브라우저 연동이 막힌다. 같은 사이트의 서브도메인 분리도 다른 출처이므로 CORS가 필요하지만, 그것만으로 `SameSite=Lax` 쿠키가 반드시 막히는 것은 아니다. 완전히 다른 사이트이면 `SameSite=None; Secure` 검토와 브라우저의 제3자 쿠키 제한 확인도 필요하다. 실제 주소를 정한 뒤 허용 출처·credentials·사용 헤더를 명시하며, credentials와 `Access-Control-Allow-Origin: *`를 함께 쓰지 않는다. [CORS 근거](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS), [쿠키 근거](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie).
