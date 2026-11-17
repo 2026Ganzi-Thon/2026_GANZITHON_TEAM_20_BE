@@ -6,8 +6,8 @@
 
 - `GET /vault/summary`는 잠김·공개 개수, 다음 공개 시각, 진행 중 또는 최초 접수 후 24시간 이내 실패한 분석 요청을 돌려준다. 위기 안내는 홈에서 복원하지 않는다.
 - `PATCH /worries/{worryId}/publication`에 `publishAt`을 ISO 오프셋 날짜·시각으로 보낸다. 잠겼고 새 시각이 현재보다 늦으며 만료 전이면 변경한다. 이미 공개됐으면 `409 ALREADY_PUBLIC`이다.
-- `GET /records?limit=20&cursor=...`는 공개된 기록만 조회한다. 항목에는 `worryId`, `createdAt`, `summary`, `anxietyBefore`, `anxietyAfter`, `anxietyDelta`, `latestHelpType`이 있다. 변화량은 후 값에서 전 값을 뺀 값이며 후 값이 없으면 `null`이다. `GET /records/{worryId}`는 금고의 공개 상세와 같은 데이터를 반환한다. 실제 상세 진입 시 기존 `POST /worries/{worryId}/view`를 호출한다.
-- `PUT /worries/{worryId}/summary`에 `{"summary":"수정 요약"}`, `PUT /worries/{worryId}/anxiety`에 `{"anxietyAfter":3}`을 보낸다. 성공하면 `204`다. 수정본과 불안도는 암호화하고 공개 상세에서 AI 원본을 유지한다.
+- `GET /records?limit=20&cursor=...`는 공개된 기록만 조회한다. 항목에는 `worryId`, `createdAt`, `summary`, `summaryEdited`, `anxietyBefore`, `anxietyAfter`, `anxietyDelta`, `latestHelpType`이 있다. `summary`는 수정본 우선이며 `summaryEdited`가 `true`면 출처를 '내가 정리했어요'로 표시한다. 변화량은 후 값에서 전 값을 뺀 값이며 후 값이 없으면 `null`이다. `GET /records/{worryId}`는 금고의 공개 상세와 같은 데이터를 반환한다. 실제 상세 진입 시 기존 `POST /worries/{worryId}/view`를 호출한다.
+- `PUT /worries/{worryId}/summary`에 `{"summary":"수정 요약"}`, `PUT /worries/{worryId}/anxiety`에 `{"anxietyAfter":3}`을 보낸다. 성공하면 `204`다. 수정본과 불안도는 암호화한다. 요약을 수정하면 수정 여부와 시각(`summary_edited_at`)을 저장한다. AI 원본 요약은 서버에만 보관하고 공개 상세의 `analysis`에는 넣지 않는다(표시용은 상위 `summary`).
 
 ## 활동과 평가
 
@@ -19,13 +19,14 @@
 ## 회고와 과거 경험
 
 - `GET /reflections/candidate?currentWorryId=...&timeZone=Asia/Seoul`은 실제 공개 가능 시각부터 24시간이 지나고, 읽었으며, 아직 답하지 않은 기록 중 가장 오래된 항목을 돌려준다. 현재 확인 중인 걱정은 후보에서 제외된다. 후보가 없으면 `204`다.
-- `POST /reflections/skip-today?timeZone=Asia/Seoul`은 해당 날짜의 후보를 숨긴다. `PUT /reflections/{worryId}?currentWorryId=...&timeZone=Asia/Seoul`에 `{"answer":"BETTER"}`를 보내 회고한다. `ONGOING`, `AS_FEARED`도 지원한다.
+- `POST /reflections/skip-today?timeZone=Asia/Seoul`은 해당 현지 날짜의 후보를 숨긴다. 서버는 현지 날짜와 함께 시간대·서버 시각을 저장하며, 같은 날 다시 보내면 처음 값을 유지한다.
+- `PUT /reflections/{worryId}?currentWorryId=...&timeZone=Asia/Seoul`에 `{"answer":"BETTER"}`를 보내 회고한다. `ONGOING`, `AS_FEARED`도 지원한다. 같은 답을 다시 보내면 `204`, 이미 다른 답을 했으면 `409 REFLECTION_ALREADY_ANSWERED`이며 처음 답을 유지한다. 지금 후보가 아니면 `409 REFLECTION_UNAVAILABLE`이다.
 - `GET /reflections/{worryId}`로 기록 상세에 표시할 기존 회고 응답과 응답 시각을 조회한다. 답하지 않았으면 `204`다.
-- `GET /worries/{worryId}/past-experience`는 같은 게스트의 공개·유효한 최근 기록에서 관련 경험 한 건을 반환한다. 초기 기준은 최근 50건, 두 개 이상 공통 단어, Jaccard 유사도 0.2 이상이다. 도움 여부는 실제 평가값을 따른다. 관련 기록이 없으면 `204`다.
+- `GET /worries/{worryId}/past-experience`는 같은 게스트의 공개·유효한 최근 기록에서 관련 경험 한 건을 반환한다. 관련성은 표시용 요약(수정본 우선)으로 계산하며 초기 기준은 최근 50건, 두 개 이상 공통 단어, Jaccard 유사도 0.2 이상이다. 활동을 고르지 않은 기록도 후보이며 이때 `helpType`은 `null`, `helpful`은 `false`다. 관련 기록이 없으면 `204`다.
 
 ## 삭제와 만료
 
-- `DELETE /worries/{worryId}`의 `202`는 접근 차단 후 정리 대기, `204`는 완료를 뜻한다. 파쇄와 일반 삭제가 이 경로를 공유한다. 만료된 기록은 서버에서 즉시 조회를 차단하고 정리 작업이 관련 활동·평가·회고·알림 행을 지운다. 개별 삭제 확인 이력은 최대 30일을 기준으로 정리한다.
+- `DELETE /worries/{worryId}`는 삭제 시작을 저장해 조회를 막은 뒤 같은 요청에서 정리까지 시도한다. 끝나면 `204`, 정리가 일부 실패하면 `202`이며 정리 작업이 재처리한다. 파쇄와 일반 삭제가 이 경로를 공유한다. 만료됐지만 정리 전인 기록에 삭제를 요청해도 정리 후 `204`다. 만료된 기록은 서버에서 즉시 조회를 차단하고 정리 작업이 관련 활동·평가·회고·알림 행을 지운다. 정리 작업은 실패한 행을 건너뛰며 (만료 시각, ID) 순서로 끝까지 진행한다. 개별 삭제 확인 이력은 최대 30일을 기준으로 정리한다.
 - `DELETE /vault`는 게스트의 기록·분석 요청·활동·회고·알림 및 인증 세션을 한 트랜잭션으로 없애고, 성공하면 `204`와 만료된 게스트 쿠키를 돌려준다. 클라이언트는 인증과 로컬 캐시를 정리하고 첫 안내로 이동한다.
 
 ## 공개 알림과 재알림
