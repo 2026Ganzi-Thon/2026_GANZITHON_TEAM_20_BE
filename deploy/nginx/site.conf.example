@@ -1,0 +1,31 @@
+# Copy outside the repository and supply the real TLS domain and certificate paths.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name vault.example.com;
+    return 308 https://vault.example.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name vault.example.com;
+
+    ssl_certificate /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+    add_header Strict-Transport-Security "max-age=86400" always;
+
+    include /etc/nginx/nightvault/rate-limit-response.conf;
+    include /etc/nginx/nightvault/rate-limits.conf;
+
+    location /api/ {
+        include /etc/nginx/nightvault/api-proxy.conf;
+    }
+
+    # Enable the SPA after deploying its files. Until then, keep the API-only root.
+    location / {
+        return 404;
+        # root /srv/nightvault/frontend/dist;
+        # try_files $uri $uri/ /index.html;
+    }
+}

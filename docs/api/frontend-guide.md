@@ -79,7 +79,8 @@ api.interceptors.response.use(
     }
     if (response?.status === 429) {
       // 요청량 제한(4절). 자동 재시도하지 않고 대기 초만 붙여 화면에 넘긴다.
-      error.retryAfterSec = Number(response.headers['retry-after']) || 10;
+      const seconds = Number(response.headers?.['retry-after']);
+      error.retryAfterSec = Number.isInteger(seconds) && seconds > 0 ? seconds : 10;
     }
     return Promise.reject(error);
   },
@@ -149,12 +150,12 @@ export const restartGuest = () => api.post('/guest-sessions', { mode: 'RESTART' 
 
 ### 요청량 제한 (429)
 
-출처: 배포 서버 설정(BE1 공지 기준). Spring이 아니라 배포 서버(Nginx)가 막으므로 로컬 개발 서버에서는 재현되지 않는다.
+평시 값은 배포 서버의 Nginx 설정을 기준으로 한다. Spring을 직접 호출하는 로컬 개발 서버에는 해당 제한이 적용되지 않는다. 발표 기간에는 별도 순간 허용량이 적용될 수 있다.
 
-| 대상 요청 | IP당 | 서버 전체 |
-|---|---|---|
-| `POST /guest-sessions` (게스트 생성, `START`·`RESTART`) | 분당 12건 | 분당 90건 |
-| `POST /worry-requests`, `POST /worry-requests/{requestId}/retry` (걱정 분석 제출·재시도, 한도 공유) | 분당 6건 | 분당 24건 |
+| 대상 요청 | IP당 평균 | 서버 전체 평균 | 평시 순간 허용 설정 (`burst`, IP / 전체) |
+|---|---|---|---|
+| `POST /guest-sessions` (게스트 생성, `START`·`RESTART`) | 분당 12건 | 분당 90건 | 6 / 20 |
+| `POST /worry-requests`, `POST /worry-requests/{requestId}/retry` (걱정 분석 제출·재시도, 한도 공유) | 분당 6건 | 분당 24건 | 5 / 12 |
 
 초과하면 아래처럼 온다(2026-11-19 배포 서버에서 게스트 생성 13회 연속 호출로 확인).
 
@@ -168,9 +169,10 @@ Retry-After: 10
 ```
 
 - 한도는 "분당 N건을 채우면 막힘"이 아니라 평균 속도 기준이다. 실측에서는 약 4초 동안 연속 호출하자 8번째에서 429가 났고, 이후 한 번은 다시 200이 왔다. 짧은 시간에 몰리면 분당 한도보다 적은 횟수에서도 429가 날 수 있다.
-- `Retry-After`는 초 단위 숫자다(현재 `10`). 헤더가 없거나 숫자가 아니면 10초로 본다.
+- `Retry-After`는 양의 정수 초다(현재 `10`). 값이 누락되거나 유효하지 않으면 10초로 본다. 대기가 끝난 뒤에도 요청이 몰리면 다시 429가 올 수 있다.
 - 프런트 처리: `message`를 그대로 띄우거나 "N초 뒤에 다시 시도해 주세요"(N = `Retry-After`)를 안내하고, 그동안 해당 버튼을 비활성화한다. **자동 재시도는 하지 않는다.** 대기 후 사용자가 다시 누르게 한다.
-- 걱정 제출·재시도를 다시 누를 때는 처음과 같은 `Idempotency-Key`를 쓴다. 429는 Nginx에서 막혀 Spring까지 가지 않은 요청이므로 접수되지 않았다.
+- 걱정 제출과 새 분석 재시도는 각각 새 `Idempotency-Key`를 만든다. 429 또는 네트워크 응답 유실 뒤 **이전에 보내던 같은 동작**을 다시 전송할 때는 그 동작의 키와 입력을 유지한다. Nginx의 `RATE_LIMITED`는 Spring에 전달되기 전 거절됐음을 뜻한다.
+- 게스트 생성, 분석 제출·재시도의 제한은 상태 조회와 CSRF 발급에는 적용하지 않는다. 분석 제출이 202인 경우 상태 조회 결과에 따라 처리 중 화면을 유지한다.
 
 ```js
 // 화면에서 (2절 인터셉터가 error.retryAfterSec를 붙인다)

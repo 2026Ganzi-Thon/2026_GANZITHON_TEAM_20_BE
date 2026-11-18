@@ -106,6 +106,8 @@ location / {
 
 실제 브라우저에서 CSRF 발급 → 게스트 생성 → CSRF 재발급 → 걱정 제출을 확인한다. 일반 HTTP 주소에서 `Secure` 세션 쿠키가 저장·재전송되지 않으면 CSRF 검증이 실패해 게스트 생성 요청이 `403`으로 끝날 수 있다. 이 경우 HTTPS 주소와 브라우저 쿠키 전달 상태를 확인한다. 프록시가 받는 HTTPS와 내부 Spring 연결의 HTTP는 이 구성에서 함께 사용한다.
 
+Nginx의 [요청량 제한과 발표 전환 절차](../deploy/nginx/README.md)는 같은 서버에 배포할 때 사용하는 평시 설정, 발표 후보 설정, 부하 확인과 원복 절차를 제공한다. `429 RATE_LIMITED`는 Nginx에서 반환되며 분석의 접수와 완료는 별도로 확인한다.
+
 ## 시연과 Solar 활성화
 
 승인된 발표 환경에 `NIGHTVAULT_DEMO_ENABLED=true`와 `NIGHTVAULT_DEMO_KEY`를 설정한다. 시연 게스트의 직접 제출·재시도는 예시 분석으로 봉인된다. 일반 게스트는 Python을 호출한다. 모의 모드에서 두 경로를 합성 입력으로 확인한다. [시연 API 가이드](api/demo-guide.md)
