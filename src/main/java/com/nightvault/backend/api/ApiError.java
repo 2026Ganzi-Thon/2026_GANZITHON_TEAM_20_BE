@@ -25,6 +25,7 @@ public enum ApiError {
     ALREADY_PUBLIC(HttpStatus.CONFLICT, "이미 공개된 걱정이에요."),
     ACTIVITY_CONFLICT(HttpStatus.CONFLICT, "활동 상태를 다시 확인해 주세요."),
     REFLECTION_UNAVAILABLE(HttpStatus.CONFLICT, "지금은 이 걱정을 회고할 수 없어요."),
+    REFLECTION_ALREADY_ANSWERED(HttpStatus.CONFLICT, "이미 답한 기록이에요."),
     NO_LOCKED_WORRY(HttpStatus.CONFLICT, "공개를 기다리는 걱정이 없어요."),
     INVALID_PUBLICATION(HttpStatus.UNPROCESSABLE_CONTENT, "공개할 날짜와 시간을 다시 선택해 주세요."),
     IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "동일 키가 다른 입력에 사용됐어요."),

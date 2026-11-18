@@ -220,7 +220,7 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 |---|---|---|
 | `GET /vault/summary` | 200 `{ lockedCount, publicCount, nearestPublishAt, analysisRequests }` | |
 | `GET /worries?visibility=LOCKED\|PUBLIC&cursor&limit` | 200 `{ visibility, items, nextCursor }` | 400 `INVALID_INPUT`(`limit` 1~100 밖, 다른 목록의 커서) |
-| `GET /worries/{worryId}` | 200 잠금이면 `LockedDetail`, 공개면 `PublicDetail` | 404 `NOT_FOUND` |
+| `GET /worries/{worryId}` | 200 잠금이면 `LockedDetail`, 공개면 `PublicDetail`(`summary` 수정본 우선, `summaryEdited`, `analysis`에는 요약 없음) | 404 `NOT_FOUND` |
 | `PATCH /worries/{worryId}/publication` `{ publishAt }` | 200 `LockedDetail` | 409 `ALREADY_PUBLIC`, 422 `INVALID_PUBLICATION`(지금 이전이거나 만료 이후) |
 | `POST /worries/{worryId}/view` | 200 `{ firstViewedAt }` | 409 `WORRY_LOCKED` |
 
@@ -228,9 +228,9 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 
 | 메서드·경로 | 응답 | 주요 오류 |
 |---|---|---|
-| `GET /records?cursor&limit` | 200 `{ items, nextCursor }` | 400 `INVALID_INPUT` |
-| `GET /records/{worryId}` | 200 `PublicDetail` | 404 `NOT_FOUND`(잠금 걱정 포함) |
-| `GET /worries/{worryId}/past-experience` | 200 `{ worryId, summary, helpType, helpful }`, 비슷한 경험 없으면 204 | 404 `NOT_FOUND` |
+| `GET /records?cursor&limit` | 200 `{ items, nextCursor }`, 항목에 `summaryEdited` 포함 | 400 `INVALID_INPUT` |
+| `GET /records/{worryId}` | 200 `PublicDetail`. 활동 이력·평가는 `GET /worries/{worryId}/activities`, 회고는 `GET /reflections/{worryId}`로 따로 조회 | 404 `NOT_FOUND`(잠금 걱정 포함) |
+| `GET /worries/{worryId}/past-experience` | 200 `{ worryId, summary, helpType, helpful }`, 비슷한 경험 없으면 204. 활동을 고르지 않은 기록이면 `helpType: null`. `helpful: true`면 `helpType`은 도움 된 활동의 유형 | 404 `NOT_FOUND`(현재 걱정이 잠김이어도 404) |
 | `PUT /worries/{worryId}/summary` `{ summary }` | 204 | 400 `INVALID_INPUT`(빈 값·500자 초과), 409 `WORRY_LOCKED` |
 | `PUT /worries/{worryId}/anxiety` `{ anxietyAfter: 1~5 }` | 204 | 400 `INVALID_INPUT`, 409 `WORRY_LOCKED` |
 
@@ -240,10 +240,10 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 
 | 메서드·경로 | 응답 | 주요 오류 |
 |---|---|---|
-| `GET /reflections/candidate?currentWorryId&timeZone` | 200 `{ worryId, firstAvailableAt }`, 후보 없으면 204 | |
-| `POST /reflections/skip-today?timeZone` | 204 (오늘 하루 후보 숨김) | |
+| `GET /reflections/candidate?currentWorryId&timeZone` | 200 `{ worryId, firstAvailableAt, summary, summaryEdited }`(요약은 수정본 우선), 후보 없으면 204 | |
+| `POST /reflections/skip-today?timeZone` | 204 (오늘 하루 후보 숨김). 같은 날 판단은 후보 조회 때 보낸 `timeZone` 기준 | |
 | `GET /reflections/{worryId}` | 200 `{ answer, respondedAt }`, 답 없으면 204 | 409 `WORRY_LOCKED` |
-| `PUT /reflections/{worryId}?currentWorryId&timeZone` `{ answer: BETTER \| ONGOING \| AS_FEARED }` | 204 (같은 답 재전송도 204) | 409 `REFLECTION_UNAVAILABLE`(지금 후보가 아님) |
+| `PUT /reflections/{worryId}?currentWorryId&timeZone` `{ answer: BETTER \| ONGOING \| AS_FEARED }` | 204 (같은 답 재전송도 204) | 409 `REFLECTION_UNAVAILABLE`(지금 후보가 아님), 409 `REFLECTION_ALREADY_ANSWERED`(이미 다른 답) |
 
 ### 삭제
 
@@ -252,7 +252,9 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 | `DELETE /worries/{worryId}` | 204 삭제 완료, 202 `{ status: "DELETING" }` 처리 중 | 404 `NOT_FOUND` |
 | `DELETE /vault` | 204, 게스트 쿠키 삭제 | |
 
-- 202는 삭제 접수이며 완료가 아니다. 응답은 `{ status: "DELETING" }`이고 삭제 작업 ID나 작업 조회 API는 없다. 삭제 중 목록에서 숨겨지는 것도 완료 증거가 아니다. 최신 develop은 동기 정리를 먼저 시도하며, 같은 소유자의 동일 ID 삭제를 다시 요청하면 완료 영수증을 통해 204를 확인할 수 있다. 이 계약으로 횟수·간격을 제한한 재확인을 구현할지 FE·BE가 합의해야 한다. 404나 타임아웃을 삭제 완료로 간주하지 않는다.
+- 서버는 같은 요청에서 정리까지 시도하고 완료되면 `204`를 반환한다. 정리가 끝나지 않으면 `202`와 `{ status: "DELETING" }`을 반환하며, 남은 정리는 백그라운드에서 재시도한다. 화면은 `202`를 처리 중으로 표시한다.
+- 별도의 삭제 작업 ID나 작업 조회 API는 없다. 같은 게스트가 같은 기록에 `DELETE`를 다시 보내 `204`를 받으면 완료로 처리한다. 정리 중인 기록은 조회와 목록에서 먼저 숨겨질 수 있으므로 `404`·목록 제외·타임아웃만으로 완료 처리하지 않는다.
+- 만료됐지만 아직 남아 있는 본인 기록도 같은 방식으로 정리한다. 이미 정리된 기록은 최근 30일 이내의 삭제 완료 기록이 있으면 `204`를 반환한다. 본인 기록이나 유효한 완료 기록을 찾을 수 없으면 `404 NOT_FOUND`를 반환한다.
 - `DELETE /vault` 후에는 게스트 세션과 CSRF 토큰이 모두 없어진다. 3절 흐름(온보딩)으로 보내고, 다음 요청 전에 CSRF 토큰을 다시 받는다(`csrf = null`).
 
 ## 8. 배포 시 주의

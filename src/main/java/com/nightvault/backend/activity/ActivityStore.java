@@ -136,6 +136,23 @@ class ActivityStore implements WorryActivityHistory {
             .list().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
+    @Override
+    public Optional<com.nightvault.backend.worry.HelpType> latestHelpful(UUID guestId, UUID worryId) {
+        return jdbc.sql("""
+            SELECT a.help_type
+            FROM activities a
+            JOIN activity_feedback f ON f.activity_id = a.id AND f.answer = 'HELPFUL'
+            JOIN worries w ON w.id = a.worry_id AND w.guest_id = a.guest_id
+            JOIN guests g ON g.id = a.guest_id AND g.state = 'ACTIVE'
+            WHERE a.guest_id = :guestId AND a.worry_id = :worryId AND %s
+            ORDER BY f.updated_at DESC, a.id DESC
+            LIMIT 1
+            """.formatted(ActivityWorryAccess.VISIBLE_WORRY))
+            .param("guestId", guestId).param("worryId", worryId).param("now", utc(clock.instant()))
+            .query((row, index) -> com.nightvault.backend.worry.HelpType.valueOf(row.getString("help_type")))
+            .optional();
+    }
+
     /**
      * 새 활동을 {@code IN_PROGRESS}로 만든다. 동시에 다른 요청이 같은 걱정에 열린 활동을 만들었으면
      * 유일 인덱스 충돌을 {@code DO NOTHING}으로 넘기고 빈 값을 돌려준다(호출자가 다시 읽는다).

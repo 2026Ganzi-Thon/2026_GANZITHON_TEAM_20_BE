@@ -27,9 +27,9 @@ class ReflectionController {
     }
 
     @GetMapping("/candidate")
-    ResponseEntity<Reflections.Candidate> candidate(@AuthenticationPrincipal UUID guest,
+    ResponseEntity<Reflections.CandidateCard> candidate(@AuthenticationPrincipal UUID guest,
         @RequestParam UUID currentWorryId, @RequestParam String timeZone) {
-        var result = reflections.candidate(guest, currentWorryId, zone(timeZone));
+        var result = reflections.card(guest, currentWorryId, zone(timeZone));
         return result == null ? ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build()
             : ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(result);
     }

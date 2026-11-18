@@ -29,6 +29,7 @@ public class WorryAccess {
              , w.request_id,
                CASE WHEN w.publish_at <= :now THEN w.input_ciphertext END AS input_ciphertext,
                CASE WHEN w.publish_at <= :now THEN w.edited_summary_ciphertext END AS edited_summary_ciphertext,
+               CASE WHEN w.publish_at <= :now THEN w.summary_edited_at END AS summary_edited_at,
                (SELECT a.content_ciphertext FROM ai_contents a
                 WHERE a.worry_id = w.id AND w.publish_at <= :now) AS content_ciphertext
         """;
@@ -134,7 +135,8 @@ public class WorryAccess {
         }
         return new VisibleWorry(metadata, new EncryptedContent(row.getObject("request_id", UUID.class),
             row.getBytes("input_ciphertext"), row.getBytes("content_ciphertext"),
-            row.getBytes("edited_summary_ciphertext"), detail ? row.getBytes("anxiety_after_ciphertext") : null));
+            row.getBytes("edited_summary_ciphertext"), row.getObject("summary_edited_at", OffsetDateTime.class) != null,
+            detail ? row.getBytes("anxiety_after_ciphertext") : null));
     }
 
     private static Metadata readMetadata(ResultSet row) throws SQLException {
@@ -154,7 +156,8 @@ public class WorryAccess {
         }
     }
 
-    record EncryptedContent(UUID requestId, byte[] input, byte[] analysis, byte[] editedSummary, byte[] anxietyAfter) {}
+    record EncryptedContent(UUID requestId, byte[] input, byte[] analysis, byte[] editedSummary,
+                            boolean summaryEdited, byte[] anxietyAfter) {}
     record VisibleWorry(Metadata metadata, EncryptedContent encrypted) {}
     record MetadataCursor(OffsetDateTime createdAt, UUID worryId) {}
     record LockedWorry(Metadata metadata, OffsetDateTime now) {}
