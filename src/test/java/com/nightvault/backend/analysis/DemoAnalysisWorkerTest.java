@@ -32,13 +32,13 @@ class DemoAnalysisWorkerTest extends IntegrationTest {
     private AnalysisPayloads payloads;
 
     private PythonAnalysisClient python;
-    private LocalAnalysisWorker worker;
+    private AnalysisWorker worker;
 
     @BeforeEach
     void configureWorker() {
         python = mock(PythonAnalysisClient.class);
         when(python.configured()).thenReturn(true);
-        worker = new LocalAnalysisWorker(jobs, payloads, python, 12);
+        worker = new AnalysisWorker(jobs, payloads, python, 12);
         clearInvocations(python);
     }
 

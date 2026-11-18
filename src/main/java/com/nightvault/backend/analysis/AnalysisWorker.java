@@ -18,9 +18,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("local")
-class LocalAnalysisWorker {
-    private static final Logger LOG = LoggerFactory.getLogger(LocalAnalysisWorker.class);
+@Profile({"local", "prod"})
+class AnalysisWorker {
+    private static final Logger LOG = LoggerFactory.getLogger(AnalysisWorker.class);
     private static final int MOCK_TIMEOUT_SECONDS = 3;
 
     private final AnalysisJobStore jobs;
@@ -29,8 +29,9 @@ class LocalAnalysisWorker {
     private final int timeoutSeconds;
     private final java.util.concurrent.ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    LocalAnalysisWorker(AnalysisJobStore jobs, AnalysisPayloads payloads, PythonAnalysisClient python,
-                        @Value("${NIGHTVAULT_AI_TIMEOUT_SECONDS:3}") int httpTimeoutSeconds) {
+    AnalysisWorker(AnalysisJobStore jobs, AnalysisPayloads payloads, PythonAnalysisClient python,
+                        @Value("${NIGHTVAULT_AI_TIMEOUT_SECONDS:${nightvault.analysis.default-timeout-seconds:3}}")
+                        int httpTimeoutSeconds) {
         if (httpTimeoutSeconds < 1 || httpTimeoutSeconds > 120) {
             throw new IllegalArgumentException("NIGHTVAULT_AI_TIMEOUT_SECONDS must be between 1 and 120.");
         }
@@ -61,7 +62,7 @@ class LocalAnalysisWorker {
                 future.cancel(true);
                 result = new AnalysisJobStore.Result(AnalysisJobStore.Outcome.RETRYABLE_FAILURE, null);
             } catch (ExecutionException exception) {
-                LOG.warn("Local analysis failed for request {}", job.requestId());
+                LOG.warn("Analysis failed for request {}", job.requestId());
                 result = new AnalysisJobStore.Result(AnalysisJobStore.Outcome.FAILURE, null);
             } catch (InterruptedException exception) {
                 future.cancel(true);
@@ -71,7 +72,7 @@ class LocalAnalysisWorker {
             jobs.finish(job, result);
         } catch (RuntimeException exception) {
             // Leave a claimed job recoverable after its lease. The exception may contain request data.
-            LOG.warn("Local analysis queue operation failed ({})", exception.getClass().getSimpleName());
+            LOG.warn("Analysis queue operation failed ({})", exception.getClass().getSimpleName());
         }
     }
 

@@ -97,7 +97,7 @@ async def analyze(
     request: Request, body: AnalysisRequest, authorization: Annotated[str | None, Header()] = None
 ):
     service_token = request.app.state.service_token
-    if service_token and not compare_digest(
+    if not service_token or not compare_digest(
         (authorization or "").encode(), f"Bearer {service_token}".encode()
     ):
         return JSONResponse({"code": "UNAUTHORIZED"}, status_code=401)

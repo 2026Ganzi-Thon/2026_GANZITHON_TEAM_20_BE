@@ -12,21 +12,28 @@
 
 ## Python 테스트 서버 실행
 
+먼저 저장소 루트의 `.env`에 `NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/analyze`와 무작위 `NIGHTVAULT_AI_TOKEN`을 추가한다. 토큰 생성은 [배포 절차의 내부 토큰 항목](../docs/deployment.md)을 참고한다. 내부 Bearer 토큰은 모의 모드에서도 필수다.
+
 Windows PowerShell에서 저장소 루트로 이동한 뒤 실행한다.
 
 ```powershell
+$env:NIGHTVAULT_ENV = "local"
 python -m venv .\AI\.venv
 .\AI\.venv\Scripts\python.exe -m pip install -r .\AI\requirements.txt
 .\AI\.venv\Scripts\python.exe -m uvicorn mock_api:app --app-dir AI --host 127.0.0.1 --port 8001 --no-access-log
 ```
 
-Spring의 루트 `.env`에 `NIGHTVAULT_AI_URL=http://127.0.0.1:8001/internal/v1/analyze`를 추가하고 `local` 프로필로 Spring을 시작한다. 선택적으로 내부 Bearer 인증을 테스트하려면 Python을 시작하는 PowerShell과 Spring의 `.env`에 동일한 `NIGHTVAULT_AI_TOKEN`을 설정한다.
+가상환경이 준비된 Cursor Git Bash에서는 아래 명령으로 시작한다. Spring은 같은 `.env`를 사용하는 `local` 프로필로 실행한다.
+
+```bash
+NIGHTVAULT_ENV=local ./AI/.venv/Scripts/python.exe -m uvicorn mock_api:app --app-dir AI --host 127.0.0.1 --port 8001 --no-access-log
+```
 
 일반 입력은 고정된 성공 콘텐츠를 반환한다. `[mock:guidance]`는 S-16 도움 안내, `[mock:failure]`는 최종 실패를 만든다. Python 모의 API의 `[mock:timeout]`은 4초 대기하므로 이 경로의 시간 초과를 검증할 때 Spring에 `NIGHTVAULT_AI_TIMEOUT_SECONDS=3`을 설정한다. 연결 실패와 시간 초과는 기존 작업 큐에서 최초 시도를 포함해 최대 3번 처리한다. 이 서버는 합성 입력으로 내부 HTTP 계약을 확인하는 용도다.
 
 ## Solar 연동 확인
 
-저장소 루트의 `.env`에 발급한 `UPSTAGE_API_KEY`를 설정한 뒤 아래 값을 추가한다. 앞의 Python 실행 명령으로 의존성을 설치하고 Python과 Spring을 다시 시작한다. Python 설정은 프로세스 환경변수를 우선 읽고, 값이 없으면 저장소 루트의 `.env`를 읽는다.
+저장소 루트의 `.env`에 발급한 `UPSTAGE_API_KEY`를 설정한 뒤 아래 값을 추가한다. 앞의 Python 실행 명령으로 의존성을 설치하고 Python과 Spring을 다시 시작한다. Python은 `NIGHTVAULT_ENV=local`이 프로세스 환경변수에 명시된 경우에 `.env`를 읽고, 같은 이름의 프로세스 환경변수가 있으면 우선 사용한다. 기본 환경은 `prod`이며 이때 `.env`를 읽지 않는다. `SPRING_PROFILES_ACTIVE`에 `prod`가 있으면서 Python 환경을 `local`로 지정하면 기동이 실패한다.
 
 ```dotenv
 NIGHTVAULT_AI_MODE=solar
@@ -40,6 +47,7 @@ NIGHTVAULT_AI_TIMEOUT_SECONDS=27
 - Spring 작업 제한은 Python의 모델 호출 제한보다 길게 설정한다. PostgreSQL 선점 기한은 Spring 작업 제한에 저장 여유 5초를 더한다. 시간 초과·호출 한도·일시 장애는 Spring이 최대 3회 시도하고, 형식 오류와 자격 증명 오류는 최종 실패로 처리한다.
 - 기본 전체 제한은 Python 24초와 Spring 27초다. 첫 문맥 분류는 최대 3초, 첫 일반 생성은 최대 5초를 사용하고, 지연될 때 같은 단계에 한해 한 번 재시도한다. 짧은 제한을 명시하면 첫 시도도 그에 비례해 줄어든다. Python 요청 전체의 24초 한도 안에서만 분류·생성·재시도를 수행한다. `.env`에 기존 10초·12초가 있으면 새 값으로 맞추고 두 서버를 재시작한다. 배포 프로필을 통합할 때에도 두 값을 배포 환경변수에 명시한다.
 - 테스트 분기는 `NIGHTVAULT_AI_MODE=mock`에서 확인한다. Python까지 호출할 때도 모의 타임아웃을 재현하려면 Spring 작업 제한을 기본 3초로 되돌린다.
+- 배포에서는 [발표 서버 배포 절차](../docs/deployment.md)에 따라 JDK 21, HTTPS와 같은 출처 프록시, 사설 Python 주소, 토큰과 데이터 키를 준비한다. #14 위기 대응 변경을 통합하고 S-16 화면 연동을 검증한 뒤 Solar 모드를 활성화한다.
 
 Python의 `mock` 모드와 Spring 내부 가짜 분석기는 실제 규칙·Solar 문맥 판정을 실행하지 않는다. `[mock:guidance]`는 HTTP 계약 검증용 고정 분기다. 실제 위기 분기는 `solar` 모드에서 별도로 확인해야 한다. 규칙과 프롬프트는 임상 판정이나 완전한 탐지를 보장하지 않으며, 사용자 지시로 분류를 유도하는 프롬프트 인젝션도 남는 한계다. 입력은 자료로만 전달하고 명확한 규칙 신호를 먼저 처리하지만 간접 표현·혼합 문맥의 우회를 완전히 막는 것은 아니다.
 

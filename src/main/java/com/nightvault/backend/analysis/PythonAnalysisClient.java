@@ -21,7 +21,7 @@ import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.json.JsonMapper;
 
 @Component
-@Profile("local")
+@Profile({"local", "prod"})
 class PythonAnalysisClient {
     private static final int MAX_RESPONSE_BYTES = 32 * 1024;
     private final URI endpoint;

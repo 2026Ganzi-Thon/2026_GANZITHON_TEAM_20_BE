@@ -244,13 +244,22 @@ class SolarAnalyzer:
 
 class AnalysisSettings:
     def __init__(self):
+        runtime = os.environ.get("NIGHTVAULT_ENV", "prod").strip().lower()
+        if runtime not in {"local", "prod"}:
+            raise ValueError("NIGHTVAULT_ENV must be local or prod")
+        spring_profiles = {profile.strip() for profile in os.environ.get("SPRING_PROFILES_ACTIVE", "").split(",")}
+        if runtime == "local" and "prod" in spring_profiles:
+            raise ValueError("The Python local environment cannot be combined with the Spring prod profile")
         env_file = Path(__file__).resolve().parents[1] / ".env"
-        values = dotenv_values(env_file, encoding="utf-8-sig", interpolate=False)
+        values = dotenv_values(env_file, encoding="utf-8-sig", interpolate=False) if runtime == "local" else {}
 
         def setting(name: str, default: str = "") -> str:
             return (os.environ.get(name, values.get(name)) or default).strip()
 
         self.service_token = setting("NIGHTVAULT_AI_TOKEN")
+        if (not self.service_token or not self.service_token.isascii()
+                or not self.service_token.isprintable() or " " in self.service_token):
+            raise ValueError("NIGHTVAULT_AI_TOKEN must be a nonblank ASCII token without spaces")
         self.mode = setting("NIGHTVAULT_AI_MODE", "mock")
         if self.mode not in {"mock", "solar"}:
             raise ValueError("NIGHTVAULT_AI_MODE must be mock or solar")
