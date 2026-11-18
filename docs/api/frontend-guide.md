@@ -77,6 +77,10 @@ api.interceptors.response.use(
       await fetchCsrf();
       return api(config); // 1회만 재시도
     }
+    if (response?.status === 429) {
+      // 요청량 제한(4절). 자동 재시도하지 않고 대기 초만 붙여 화면에 넘긴다.
+      error.retryAfterSec = Number(response.headers['retry-after']) || 10;
+    }
     return Promise.reject(error);
   },
 );
@@ -136,11 +140,51 @@ export const restartGuest = () => api.post('/guest-sessions', { mode: 'RESTART' 
 | 403 | `FORBIDDEN` | CSRF 외 접근 거부. 토스트 |
 | 404 | `NOT_FOUND` | "확인할 수 없는 항목" 안내 후 홈으로 (남의 것·삭제 중·만료 모두 404) |
 | 409 | `WORRY_LOCKED` | 아직 공개 전. 잠금 화면 |
+| 429 | `RATE_LIMITED` | 요청량 제한. 아래 "요청량 제한" 참고 |
 | 503 | `TEMPORARILY_UNAVAILABLE` | "잠시 후 다시" + 재시도 버튼 |
 
 - 오류 응답은 전역 예외 처리(`ApiExceptionHandler`)가 같은 형식으로 만든다. JSON 파싱 실패, 필수 쿼리·헤더 누락, 경로 UUID 형식 오류도 모두 400 `INVALID_INPUT`이고, DB 오류는 503 `TEMPORARILY_UNAVAILABLE`이다.
 - 오류 응답에는 `Cache-Control: no-store`가 붙는다.
 - 존재하지 않는 API 경로는 404 `NOT_FOUND`, 잘못된 HTTP 메서드는 405 `METHOD_NOT_ALLOWED`(`Allow` 유지), JSON을 받을 수 없는 `Accept`는 406 `NOT_ACCEPTABLE`, 지원하지 않는 요청 본문 형식은 415 `UNSUPPORTED_MEDIA_TYPE`이다. 프록시가 이 상태를 200 HTML로 바꾸지 않아야 한다.
+
+### 요청량 제한 (429)
+
+출처: 배포 서버 설정(BE1 공지 기준). Spring이 아니라 배포 서버(Nginx)가 막으므로 로컬 개발 서버에서는 재현되지 않는다.
+
+| 대상 요청 | IP당 | 서버 전체 |
+|---|---|---|
+| `POST /guest-sessions` (게스트 생성, `START`·`RESTART`) | 분당 12건 | 분당 90건 |
+| `POST /worry-requests`, `POST /worry-requests/{requestId}/retry` (걱정 분석 제출·재시도, 한도 공유) | 분당 6건 | 분당 24건 |
+
+초과하면 아래처럼 온다(2026-11-19 배포 서버에서 게스트 생성 13회 연속 호출로 확인).
+
+```http
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+Cache-Control: no-store
+Retry-After: 10
+
+{"code":"RATE_LIMITED","message":"요청이 너무 많아요. 잠시 후 다시 시도해 주세요."}
+```
+
+- 한도는 "분당 N건을 채우면 막힘"이 아니라 평균 속도 기준이다. 실측에서는 약 4초 동안 연속 호출하자 8번째에서 429가 났고, 이후 한 번은 다시 200이 왔다. 짧은 시간에 몰리면 분당 한도보다 적은 횟수에서도 429가 날 수 있다.
+- `Retry-After`는 초 단위 숫자다(현재 `10`). 헤더가 없거나 숫자가 아니면 10초로 본다.
+- 프런트 처리: `message`를 그대로 띄우거나 "N초 뒤에 다시 시도해 주세요"(N = `Retry-After`)를 안내하고, 그동안 해당 버튼을 비활성화한다. **자동 재시도는 하지 않는다.** 대기 후 사용자가 다시 누르게 한다.
+- 걱정 제출·재시도를 다시 누를 때는 처음과 같은 `Idempotency-Key`를 쓴다. 429는 Nginx에서 막혀 Spring까지 가지 않은 요청이므로 접수되지 않았다.
+
+```js
+// 화면에서 (2절 인터셉터가 error.retryAfterSec를 붙인다)
+try {
+  await startGuest();
+} catch (e) {
+  if (errorCode(e) === 'RATE_LIMITED') {
+    toast(`${e.retryAfterSec}초 뒤에 다시 시도해 주세요.`);
+    disableButtonFor(e.retryAfterSec * 1000); // 자동 재시도 없음
+    return;
+  }
+  throw e;
+}
+```
 
 ### 활동 (BE2)
 
@@ -258,6 +302,8 @@ BE1 초기 화면용 경로가 같은 활동 데이터를 다른 모양으로 �
 - `DELETE /vault` 후에는 게스트 세션과 CSRF 토큰이 모두 없어진다. 3절 흐름(온보딩)으로 보내고, 다음 요청 전에 CSRF 토큰을 다시 받는다(`csrf = null`).
 
 ## 8. 배포 시 주의
+
+- 배포 주소: `https://woolyvault.duckdns.org`, API 기본 경로 `/api/v1` (예: `https://woolyvault.duckdns.org/api/v1/csrf`). 이 서버에는 4절 요청량 제한이 적용된다.
 
 - 이 가이드는 **프런트와 API가 같은 HTTPS 출처**(스킴·호스트·포트가 같음, 리버스 프록시: `https://app.example.com/` → 프런트, `/api/` → 백엔드)인 전제다. 그래서 CORS 설정이 없고 쿠키가 `SameSite=Lax`다.
 - 운영 쿠키는 `Secure`라 **HTTPS**에서만 저장된다.
