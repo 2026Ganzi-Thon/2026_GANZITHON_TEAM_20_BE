@@ -202,6 +202,8 @@ class CrisisRoutingTest(IsolatedAsyncioTestCase):
             "나 진짜 죽구 싶어. 장난 아니야.",
             "저 정말 지금 죽고 시퍼요.",
             "정말 죽구시퍼요.",
+            "이제 그만 살고 싶어",
+            "오늘 밤에 다 끝낼 거야",
         )
         for text in cases:
             with self.subTest(text=text):
@@ -287,6 +289,12 @@ class CrisisAssessmentTest(TestCase):
             ("내일 발표가 너무 걱정돼요.", CrisisDecision.GENERATE),
             ("창피해서 죽을 만큼 힘들었어요.", CrisisDecision.GENERATE),
             ("그림에서 손목을 그리는 게 어려워요.", CrisisDecision.GENERATE),
+            ("이제 그만 살고 싶어", CrisisDecision.NEEDS_CONTEXT),
+            ("이제그만살고싶다", CrisisDecision.NEEDS_CONTEXT),
+            ("오늘 밤에 다 끝낼 거야", CrisisDecision.NEEDS_CONTEXT),
+            ("오늘 다 끝낼게", CrisisDecision.NEEDS_CONTEXT),
+            ("이제 그만 살고 싶지 않아", CrisisDecision.GUIDANCE),
+            ("프로젝트를 끝낼 계획이야", CrisisDecision.GENERATE),
         ]
         for text, expected in cases:
             with self.subTest(text=text):
