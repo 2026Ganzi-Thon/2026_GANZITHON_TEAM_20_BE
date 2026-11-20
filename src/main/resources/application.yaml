@@ -1,10 +1,17 @@
 spring:
   application:
     name: nightvault
-  config:
-    import: "optional:file:./.env[.properties]"
   profiles:
     active: "${SPRING_PROFILES_ACTIVE:}"
+    default: local
+  flyway:
+    # Existing BE1 and BE2 databases applied different timestamped versions before integration.
+    out-of-order: true
+    group: true
+  task:
+    scheduling:
+      pool:
+        size: 3
 server:
   servlet:
     session:
@@ -12,3 +19,7 @@ server:
         http-only: true
         secure: true
         same-site: lax
+nightvault:
+  demo:
+    # 시연 패널(S-18) API. 켜더라도 환경변수 NIGHTVAULT_DEMO_KEY가 비어 있으면 모든 시연 API가 404다.
+    enabled: "${NIGHTVAULT_DEMO_ENABLED:false}"

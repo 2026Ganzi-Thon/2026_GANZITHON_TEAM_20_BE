@@ -1,11 +1,11 @@
-package com.nightvault.backend.analysis;
+package com.nightvault.backend.activity;
 
 import com.nightvault.backend.api.ApiError;
 
-final class AnalysisException extends RuntimeException {
+final class ActivityException extends RuntimeException {
     private final ApiError error;
 
-    AnalysisException(ApiError error) {
+    ActivityException(ApiError error) {
         super(error.name());
         this.error = error;
     }
